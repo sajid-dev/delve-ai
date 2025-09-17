@@ -1,0 +1,21 @@
+[project]
+name = "delve-ai"
+version = "0.1.0"
+description = "A production‑grade AI chat backend using FastAPI, LangChain and ChromaDB."
+authors = [{name = "Your Name", email = "you@example.com"}]
+readme = "README.md"
+requires-python = ">=3.9"
+
+[project.dependencies]
+fastapi = "0.116.2"  # Latest stable version of FastAPI released Sep 16, 2025【137976688719320†L24-L33】
+pydantic = "2.11.9"  # Latest Pydantic v2 for schema validation【581451928006372†L24-L33】
+uvicorn = "0.35.0"  # ASGI server for FastAPI【49292205645521†L25-L33】
+langchain = "0.3.27"  # Core LangChain library【999262495312987†L24-L31】
+langchain-openai = "0.3.33"  # Integration package for OpenAI【779018995089349†L25-L33】
+chromadb = "1.1.0"  # ChromaDB vector store【626809558140289†L24-L33】
+loguru = "0.7.3"  # Structured logging library【783113682410817†L24-L33】
+python-dotenv = "1.0.0"  # Load environment variables from .env
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
