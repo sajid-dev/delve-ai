@@ -25,6 +25,8 @@ class UserConversationStats(BaseModel):
     user_id: str
     conversation_count: int
     total_tokens: int
+    last_active: datetime | None
+    is_active: bool
     conversations: List[ConversationStats]
 
 
@@ -32,6 +34,7 @@ class DashboardData(BaseModel):
     """Top-level container for admin dashboard analytics."""
 
     total_users: int
+    active_users: int
     total_conversations: int
     total_tokens: int
     users: List[UserConversationStats]

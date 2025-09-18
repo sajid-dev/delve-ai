@@ -8,6 +8,7 @@ controllers can remain thin.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from functools import lru_cache
 from loguru import logger
 
@@ -126,15 +127,20 @@ class ChatService:
         users: list[UserConversationStats] = []
         total_tokens = 0
         total_conversations = 0
+        active_users = 0
+        activity_threshold = datetime.utcnow() - timedelta(hours=24)
 
         for user_id, conversations in conversations_by_user.items():
             conversation_stats: list[ConversationStats] = []
             user_token_sum = 0
+            last_active: datetime | None = None
 
             for conversation in conversations:
                 tokens_used = self.llm_service.count_tokens(conversation.messages)
                 user_token_sum += tokens_used
                 total_conversations += 1
+                if last_active is None or conversation.updated_at > last_active:
+                    last_active = conversation.updated_at
                 conversation_stats.append(
                     ConversationStats(
                         conversation_id=conversation.conversation_id,
@@ -147,17 +153,23 @@ class ChatService:
                 )
 
             total_tokens += user_token_sum
+            is_active = bool(last_active and last_active >= activity_threshold)
+            if is_active:
+                active_users += 1
             users.append(
                 UserConversationStats(
                     user_id=user_id,
                     conversation_count=len(conversations),
                     total_tokens=user_token_sum,
+                    last_active=last_active,
+                    is_active=is_active,
                     conversations=conversation_stats,
                 )
             )
 
         return DashboardData(
             total_users=len(conversations_by_user),
+            active_users=active_users,
             total_conversations=total_conversations,
             total_tokens=total_tokens,
             users=users,
