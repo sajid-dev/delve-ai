@@ -32,12 +32,12 @@ async def chat_endpoint(
     dialogue in context.
     """
     try:
-        logger.info("Received chat request: %r", request)
+        logger.info("Received chat request: {}", request)
         response = service.chat(request)
         logger.info("Answer generated successfully")
         return response
     except ChatError as exc:
-        logger.error("ChatError: %s", exc)
+        logger.error("ChatError: {}", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
@@ -62,7 +62,7 @@ async def list_conversations_endpoint(
     user has no conversations.
     """
     try:
-        logger.info("Listing conversations for user: %s", user_id)
+        logger.info("Listing conversations for user: {}", user_id)
         return service.list_conversations(user_id)
     except Exception as exc:
         logger.exception("Failed to list conversations")

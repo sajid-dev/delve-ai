@@ -41,6 +41,7 @@ Below is an overview of additional features supported by the architecture.  Item
 - **Automatic user ID generation** – unique user identification (*ready*).
 - **Session persistence** – maintains state across sessions (implemented via persistent storage).
 - **User data isolation** – complete privacy between users (*ready*; requires user memory manager).
+- **Provider-aware attribution** – forwards the supplied `user_id` to the LLM for auditing and usage tracking (implemented).
 - **User preference storage** – architecture for user settings (*ready*).
 - **Authentication ready** – prepared for user login systems (*ready*).
 
@@ -235,7 +236,9 @@ GET /health
 
 ### `POST /chat`
 
-Starts or continues a conversation and returns an assistant response.  The request body must include a non‑empty `message` field.  Optional `user_id` and `conversation_id` fields allow the client to specify an existing user and conversation.  If omitted, new identifiers are generated and returned in the response.  Input validation is handled by Pydantic; if the `message` field is missing, empty or exceeds 500 characters, FastAPI will return a 422 error.
+Starts or continues a conversation and returns an assistant response.  The request body must include a non-empty `message` field.  Optional `user_id` and `conversation_id` fields allow the client to specify an existing user and conversation.  If omitted, new identifiers are generated and returned in the response.  Input validation is handled by Pydantic; if the `message` field is missing, empty or exceeds 500 characters, FastAPI will return a 422 error.
+
+When a `user_id` is present it is forwarded to the underlying language model, enabling per-user analytics, auditing or quota management at the model provider level.
 
 **Request:**
 

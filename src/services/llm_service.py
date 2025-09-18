@@ -47,24 +47,31 @@ class LLMService:
         # base URL, max_tokens or timeout are specified they are also passed
         # through.  These keys correspond to aliases documented in the
         # ``langchain_openai`` API reference【149861662473305†L170-L184】.
-        llm_kwargs: dict[str, object] = {
+        self._llm_kwargs: dict[str, object] = {
             "api_key": self.llm_config.api_key,
             "model": self.llm_config.model,
             "temperature": self.llm_config.temperature,
         }
         if self.llm_config.base_url:
-            llm_kwargs["base_url"] = self.llm_config.base_url
+            self._llm_kwargs["base_url"] = self.llm_config.base_url
         # Pass optional tuning parameters only if they differ from defaults
         if self.llm_config.max_tokens:
-            llm_kwargs["max_tokens"] = self.llm_config.max_tokens
+            self._llm_kwargs["max_tokens"] = self.llm_config.max_tokens
         if self.llm_config.timeout:
-            llm_kwargs["timeout"] = self.llm_config.timeout
+            self._llm_kwargs["timeout"] = self.llm_config.timeout
+
+        # Optional keyword arguments forwarded to the model constructor (e.g. user-level tags).
+        self._model_kwargs: dict[str, object] = {}
+
+        init_kwargs: dict[str, object] = dict(self._llm_kwargs)
+        if self._model_kwargs:
+            init_kwargs["model_kwargs"] = dict(self._model_kwargs)
 
         # Initialise the ChatOpenAI model with the assembled kwargs.  Unspecified
         # parameters will fall back to library defaults.
-        self.llm = ChatOpenAI(**llm_kwargs)
+        self.llm = ChatOpenAI(**init_kwargs)
 
-    def generate(self, prompt: str, memory: ChatMemory) -> str:
+    def generate(self, prompt: str, memory: ChatMemory, user_id: str | None = None) -> str:
         """Generate a response using the provided prompt and memory.
 
         This method wraps the LangChain call in a try/except block so that
@@ -77,6 +84,10 @@ class LLMService:
             The user's input message.
         memory: ChatMemory
             A chat memory instance providing conversation history.
+        user_id: str, optional
+            Identifier of the end user for the request.  When provided the
+            identifier is forwarded to the underlying LLM so usage can be
+            tracked per user.
 
         Returns
         -------
@@ -88,11 +99,17 @@ class LLMService:
         ChatError
             If an unexpected error occurs during generation.
         """
-        logger.debug("Generating response for prompt: %r", prompt)
+        logger.debug("Generating response for prompt: {!r}", prompt)
         try:
+            llm = self.llm
+            if user_id:
+                # Recreate the LLM with the user identifier, forwarding via model_kwargs
+                # to avoid warnings from the underlying client.
+                model_kwargs = {**self._model_kwargs, "user": user_id}
+                llm = ChatOpenAI(**self._llm_kwargs, model_kwargs=model_kwargs)
             # Build a conversation chain combining the LLM and existing memory
             chain = ConversationChain(
-                llm=self.llm,
+                llm=llm,
                 memory=memory.memory,
                 verbose=False,
             )

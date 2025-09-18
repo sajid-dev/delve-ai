@@ -45,7 +45,7 @@ class MemoryService:
         generated automatically.
         """
         logger.debug(
-            "Saving interaction to memory: user=%s conv=%s Q=%r A=%r",
+            "Saving interaction to memory: user={} conv={} Q={!r} A={!r}",
             user_id,
             conversation_id,
             question,

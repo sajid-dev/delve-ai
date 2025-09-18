@@ -1,51 +1,49 @@
-"""LLM configuration definitions.
-
-This module defines a `LlmConfig` class representing the unified
-configuration required to initialise a ChatGPT‑compatible model using
-LangChain's `ChatOpenAI` integration.  The configuration no longer
-distinguishes between OpenAI and other providers; instead a single
-set of fields covers API credentials, endpoint configuration and
-tuning parameters.  The `get_llm_config` helper caches an instance so
-it can be re‑used throughout the application.
-"""
-
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class LlmConfig(BaseSettings):
-    """Unified configuration for interacting with a language model API.
+    """Configuration settings for language model integrations."""
 
-    This settings class defines a single set of fields for
-    communicating with a ChatGPT‑compatible endpoint.  It no longer
-    distinguishes between OpenAI and other providers.  Instead,
-    applications should set `LLM_API_KEY`, `LLM_BASE_URL` (optional)
-    and `LLM_MODEL` in the environment.  Additional parameters such as
-    temperature, max tokens and timeout control the behaviour of the
-    language model.
-    """
+    api_key: str = Field(..., alias="LLM_API_KEY")
+    base_url: Optional[str] = Field(default=None, alias="LLM_BASE_URL")
+    model: str = Field("gpt-3.5-turbo", alias="LLM_MODEL")
+    temperature: float = Field(0.7, alias="LLM_TEMPERATURE")
+    max_tokens: Optional[int] = Field(None, alias="LLM_MAX_TOKENS")
+    timeout: int = Field(30, alias="LLM_TIMEOUT")
 
-    # API key used by the LLM provider (e.g., OpenAI, LLaMA)
-    api_key: str
-    # Base URL for the API.  If left blank, the default OpenAI endpoint will be used.
-    base_url: str | None = None
-    # Model name to use for chat (e.g., gpt-3.5-turbo or llama-2-7b-chat)
-    model: str = "gpt-3.5-turbo"
-    # Temperature controlling randomness of responses
-    temperature: float = 0.7
-    # Maximum number of tokens to generate
-    max_tokens: int = 2048
-    # Timeout in seconds for API calls
-    timeout: int = 30
+    @field_validator("temperature")
+    def validate_temperature(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("LLM_TEMPERATURE must be between 0.0 and 1.0")
+        return value
 
-    # Path to the `.env` file; Pydantic will read variables from this file
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    @field_validator("timeout")
+    def validate_timeout(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("LLM_TIMEOUT must be positive")
+        return value
+
+    @field_validator("max_tokens")
+    def validate_max_tokens(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value <= 0:
+            raise ValueError("LLM_MAX_TOKENS must be positive")
+        return value
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
 
 @lru_cache()
 def get_llm_config() -> LlmConfig:
-    """Return a cached LlmConfig instance.
+    """Return a cached language model configuration."""
 
-    The result is cached so subsequent calls reuse the same configuration.
-    """
-    return LlmConfig()  # type: ignore[arg-type]
+    return LlmConfig()
+
+
+# Global LLM configuration instance for convenience
+llm_config = get_llm_config()

@@ -6,17 +6,19 @@ authors = [{ name = "Your Name", email = "you@example.com" }]
 readme = "README.md"
 requires-python = ">=3.9"
 
+# Core runtime dependencies grouped by responsibility for quick reference.
 dependencies = [
-    "chromadb>=1.1.0",
-    "fastapi>=0.116.2",
-    "langchain>=0.3.27",
-    "langchain-community>=0.3.29",
-    "langchain-openai>=0.3.33",
-    "loguru>=0.7.3",
-    "pydantic>=2.11.9",
-    "pydantic-settings>=2.10.1",
-    "python-dotenv>=1.1.1",
-    "uvicorn>=0.35.0",
+    "chromadb>=1.1.0",              # Persistent vector store for conversation memory
+    "fastapi>=0.116.2",             # ASGI web framework powering the API
+    "langchain>=0.3.27",            # Orchestration library for LLM workflows
+    "langchain-chroma>=0.2.6",      # Chroma vector store integration
+    "langchain-community>=0.3.29",  # Community-maintained LangChain components
+    "langchain-openai>=0.3.33",     # OpenAI-compatible chat/embedding clients
+    "loguru>=0.7.3",                # Structured logging
+    "pydantic>=2.11.9",             # Data validation for request/response models
+    "pydantic-settings>=2.10.1",    # Environment-driven configuration loader
+    "python-dotenv>=1.1.1",         # Loads .env files during development
+    "uvicorn>=0.35.0",              # ASGI server for local/dev deployments
 ]
 
 [build-system]

@@ -64,7 +64,7 @@ class ChatService:
         ChatError
             If any exception occurs during processing.
         """
-        logger.info("Processing chat for request: %s", chat_request)
+        logger.info("Processing chat for request: {}", chat_request)
         try:
             # Determine or generate user and conversation identifiers
             user_id = chat_request.user_id or str(uuid.uuid4())
@@ -73,7 +73,11 @@ class ChatService:
             # Retrieve memory for this user and conversation
             chat_memory = self.memory_service.get_memory(user_id, conversation_id)
             # Generate an answer using the LLM and current memory
-            answer_text = self.llm_service.generate(chat_request.message, memory=chat_memory)
+            answer_text = self.llm_service.generate(
+                chat_request.message,
+                memory=chat_memory,
+                user_id=user_id,
+            )
             # Persist the interaction (both question and answer) and update metadata
             self.memory_service.save_interaction(
                 user_id=user_id,
@@ -111,6 +115,37 @@ class ChatService:
     def delete_all_conversations(self, user_id: str) -> None:
         """Delete all conversations for a user."""
         self.memory_service.delete_all_conversations(user_id)
+
+    # ------------------------------------------------------------------
+    # Health and service info
+
+    def health_check(self) -> dict[str, str]:
+        """Return a simple health status for the chat service.
+
+        This method can be used by higher-level controllers to verify
+        that the service and its dependencies are reachable.  It
+        currently returns a static status but could be extended to
+        perform checks against the LLM and memory backends.
+        """
+        try:
+            # We could add more sophisticated checks here (e.g. ping the LLM)
+            return {"status": "ok"}
+        except Exception:
+            return {"status": "unhealthy"}
+
+    def get_service_info(self) -> dict[str, object]:
+        """Return basic information about the chat service.
+
+        Provides configuration details such as the LLM model name and
+        tuning parameters.  This can be useful for UI components to
+        display the current backend configuration.
+        """
+        return {
+            "model": self.llm_config.model,
+            "temperature": self.llm_config.temperature,
+            "max_tokens": self.llm_config.max_tokens,
+            "timeout": self.llm_config.timeout,
+        }
 
 
 @lru_cache()
