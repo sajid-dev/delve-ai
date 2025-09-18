@@ -17,6 +17,7 @@ from .utils.logger import setup_logging
 # settings have been separated into dedicated config modules.
 from .config.app_config import app_config  # noqa: F401
 from .controllers.chat_controller import router as chat_router
+from .controllers.admin_controller import router as admin_router
 from .utils.error_handler import ChatError, http_exception_handler
 
 
@@ -42,6 +43,8 @@ def create_app() -> FastAPI:
 
     # Include chat routes
     app.include_router(chat_router)
+    # Include admin analytics routes
+    app.include_router(admin_router)
 
     @app.get("/health", tags=["Health"])
     async def health() -> dict[str, str]:

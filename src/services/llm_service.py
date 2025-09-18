@@ -7,12 +7,17 @@ instance and returns the generated response.
 
 from __future__ import annotations
 
+import math
+
 from loguru import logger
 from langchain.chains import ConversationChain
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ..config.llm_config import LlmConfig, get_llm_config
 from ..memory.chat_memory import ChatMemory
+from ..models.chat_message import ChatMessage
+from ..models.enums import MessageRole
 
 
 class LLMService:
@@ -120,3 +125,35 @@ class LLMService:
             from ..utils.error_handler import ChatError
 
             raise ChatError("LLM generation failed") from exc
+
+    # ------------------------------------------------------------------
+    # Token accounting helpers
+
+    def count_tokens(self, messages: list[ChatMessage]) -> int:
+        """Return token usage for a sequence of chat messages.
+
+        Falls back to a simple character-based heuristic if the underlying
+        model does not expose token counting utilities.
+        """
+        if not messages:
+            return 0
+
+        if hasattr(self.llm, "get_num_tokens_from_messages"):
+            lc_messages = []
+            for message in messages:
+                role = message.role
+                content = message.content
+                if role == MessageRole.USER:
+                    lc_messages.append(HumanMessage(content=content))
+                elif role == MessageRole.ASSISTANT:
+                    lc_messages.append(AIMessage(content=content))
+                else:
+                    lc_messages.append(SystemMessage(content=content))
+            try:
+                return int(self.llm.get_num_tokens_from_messages(lc_messages))
+            except Exception:
+                # Fall through to heuristic if token counting fails
+                pass
+
+        # Simple heuristic: average of 4 characters per token with minimum of 1
+        return sum(max(1, math.ceil(len(message.content) / 4)) for message in messages)

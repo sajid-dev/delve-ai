@@ -99,6 +99,15 @@ class UserMemoryManager:
             return []
         return list(self._conversations[user_id].values())
 
+    def list_all_conversations(self) -> dict[str, list["Conversation"]]:
+        """Return conversations grouped by user identifier."""
+        from ..models.conversation import Conversation
+
+        return {
+            user_id: list(conversations.values())
+            for user_id, conversations in self._conversations.items()
+        }
+
     def get_conversation(self, user_id: str, conversation_id: str) -> "Conversation" | None:
         """Return metadata for a specific conversation or None if missing."""
         return self._conversations.get(user_id, {}).get(conversation_id)
