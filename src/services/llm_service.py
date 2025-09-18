@@ -1,4 +1,4 @@
-"""Service encapsulating interactions with the language model.
+﻿"""Service encapsulating interactions with the language model.
 
 Uses LangChain's ChatOpenAI integration to communicate with the
 OpenAI Chat API.  The service accepts a prompt and a memory
@@ -8,7 +8,7 @@ instance and returns the generated response.
 from __future__ import annotations
 
 from loguru import logger
-from langchain.chains import ConversationChain
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ..config.llm_config import LlmConfig, get_llm_config
@@ -20,7 +20,7 @@ class LLMService:
 
     This service wraps LangChain's :class:`~langchain_openai.ChatOpenAI` class and
     constructs it based solely on a unified :class:`LlmConfig` instance.  All
-    provider‑specific details (such as API keys, base URL and model name) are
+    provider-specific details (such as API keys, base URL and model name) are
     defined in a single configuration.  There is no longer any distinction
     between OpenAI and other providers – if a ``base_url`` is provided the
     client will communicate with the supplied endpoint, otherwise it will use
@@ -46,7 +46,7 @@ class LLMService:
         # minimum the API key, model name and temperature are provided.  If a
         # base URL, max_tokens or timeout are specified they are also passed
         # through.  These keys correspond to aliases documented in the
-        # ``langchain_openai`` API reference【149861662473305†L170-L184】.
+        # ``langchain_openai`` API reference.
         self._llm_kwargs: dict[str, object] = {
             "api_key": self.llm_config.api_key,
             "model": self.llm_config.model,
@@ -70,6 +70,14 @@ class LLMService:
         # Initialise the ChatOpenAI model with the assembled kwargs.  Unspecified
         # parameters will fall back to library defaults.
         self.llm = ChatOpenAI(**init_kwargs)
+
+        # Base system prompt used for every interaction.  Additional context is
+        # appended dynamically from the conversation memory on each request.
+        self._system_prompt = (
+            "You are a helpful AI assistant. Use the provided conversation context "
+            "when it is available. If the context is empty, respond using only the "
+            "latest user message."
+        )
 
     def generate(self, prompt: str, memory: ChatMemory, user_id: str | None = None) -> str:
         """Generate a response using the provided prompt and memory.
@@ -107,14 +115,22 @@ class LLMService:
                 # to avoid warnings from the underlying client.
                 model_kwargs = {**self._model_kwargs, "user": user_id}
                 llm = ChatOpenAI(**self._llm_kwargs, model_kwargs=model_kwargs)
-            # Build a conversation chain combining the LLM and existing memory
-            chain = ConversationChain(
-                llm=llm,
-                memory=memory.memory,
-                verbose=False,
-            )
-            response = chain.predict(input=prompt)
-            return response.strip()
+
+            # Retrieve the most relevant snippets stored in memory to ground the response.
+            history_snippets = memory.get_relevant_history(prompt)
+            if history_snippets:
+                system_message = f"{self._system_prompt}\n\nContext:\n{history_snippets}"
+            else:
+                system_message = f"{self._system_prompt}\n\nContext: <none>"
+
+            messages = [
+                SystemMessage(content=system_message),
+                HumanMessage(content=prompt),
+            ]
+
+            response = llm.invoke(messages)
+            content = getattr(response, "content", str(response))
+            return content.strip()
         except Exception as exc:
             logger.exception("LLM generation failed")
             from ..utils.error_handler import ChatError
