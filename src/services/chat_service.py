@@ -17,6 +17,7 @@ from ..models.chat_response import ChatResponse
 from ..models.chat_request import ChatRequest
 from ..models.conversation import Conversation
 import uuid
+from ..models.dashboard import ConversationStats, DashboardData, UserConversationStats
 from ..utils.error_handler import ChatError
 from .memory_service import MemoryService
 from .llm_service import LLMService
@@ -118,6 +119,49 @@ class ChatService:
 
     # ------------------------------------------------------------------
     # Health and service info
+
+    def get_dashboard_data(self) -> DashboardData:
+        """Return analytics for all users and conversations."""
+        conversations_by_user = self.memory_service.list_all_conversations()
+        users: list[UserConversationStats] = []
+        total_tokens = 0
+        total_conversations = 0
+
+        for user_id, conversations in conversations_by_user.items():
+            conversation_stats: list[ConversationStats] = []
+            user_token_sum = 0
+
+            for conversation in conversations:
+                tokens_used = self.llm_service.count_tokens(conversation.messages)
+                user_token_sum += tokens_used
+                total_conversations += 1
+                conversation_stats.append(
+                    ConversationStats(
+                        conversation_id=conversation.conversation_id,
+                        title=conversation.title,
+                        message_count=conversation.message_count,
+                        created_at=conversation.created_at,
+                        updated_at=conversation.updated_at,
+                        tokens_used=tokens_used,
+                    )
+                )
+
+            total_tokens += user_token_sum
+            users.append(
+                UserConversationStats(
+                    user_id=user_id,
+                    conversation_count=len(conversations),
+                    total_tokens=user_token_sum,
+                    conversations=conversation_stats,
+                )
+            )
+
+        return DashboardData(
+            total_users=len(conversations_by_user),
+            total_conversations=total_conversations,
+            total_tokens=total_tokens,
+            users=users,
+        )
 
     def health_check(self) -> dict[str, str]:
         """Return a simple health status for the chat service.

@@ -9,6 +9,7 @@ The **delve‑ai** backend is designed as a production‑ready foundation for en
 ### Core API endpoints
 
 - **Chat endpoint** – `POST /chat` accepts a prompt and returns an AI response.
+- **Admin dashboard** – `GET /admin/dashboard` reports per-user conversations with aggregated token usage.
 - **Health check** – `GET /health` responds with the current health of the service.
 - **LangChain integration** – uses `langchain` and `langchain‑openai` for conversation chains backed by a `ChromaDB` vector store.
 - **Structured logging** – uses Loguru with log rotation and retention to persist logs in `logs/app.log`.
@@ -65,6 +66,7 @@ Below is an overview of additional features supported by the architecture.  Item
 #### 📊 Monitoring & analytics
 
 - **Service health checks** – comprehensive system monitoring (implemented).
+- **Conversation analytics dashboard** – built-in admin endpoint summarising usage across users (implemented).
 - **Performance metrics** – response times, success rates (*ready*).
 - **Usage statistics** – conversation counts, message volumes (*ready*).
 - **Logging infrastructure** – structured logging with multiple levels (implemented).
@@ -188,6 +190,12 @@ Below is an overview of additional features supported by the architecture.  Item
 
    ```bash
    curl http://localhost:8000/health
+   ```
+
+   Admin operators can inspect usage analytics:
+
+   ```bash
+   curl http://localhost:8000/admin/dashboard
    ```
 
 ## Project structure

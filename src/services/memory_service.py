@@ -75,6 +75,10 @@ class MemoryService:
         """Return a list of all conversations for a user."""
         return self._manager.list_conversations(user_id)
 
+    def list_all_conversations(self) -> dict[str, list[Conversation]]:
+        """Return all conversations grouped by user identifier."""
+        return self._manager.list_all_conversations()
+
     def get_conversation(self, user_id: str, conversation_id: str) -> Conversation | None:
         """Return a single conversation metadata record."""
         return self._manager.get_conversation(user_id, conversation_id)

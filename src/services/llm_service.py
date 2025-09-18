@@ -1,4 +1,4 @@
-﻿"""Service encapsulating interactions with the language model.
+"""Service encapsulating interactions with the language model.
 
 Uses LangChain's ChatOpenAI integration to communicate with the
 OpenAI Chat API.  The service accepts a prompt and a memory
@@ -7,12 +7,16 @@ instance and returns the generated response.
 
 from __future__ import annotations
 
+import math
+
 from loguru import logger
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from ..config.llm_config import LlmConfig, get_llm_config
 from ..memory.chat_memory import ChatMemory
+from ..models.chat_message import ChatMessage
+from ..models.enums import MessageRole
 
 
 class LLMService:
@@ -20,7 +24,7 @@ class LLMService:
 
     This service wraps LangChain's :class:`~langchain_openai.ChatOpenAI` class and
     constructs it based solely on a unified :class:`LlmConfig` instance.  All
-    provider-specific details (such as API keys, base URL and model name) are
+    provider‑specific details (such as API keys, base URL and model name) are
     defined in a single configuration.  There is no longer any distinction
     between OpenAI and other providers – if a ``base_url`` is provided the
     client will communicate with the supplied endpoint, otherwise it will use
@@ -116,7 +120,6 @@ class LLMService:
                 model_kwargs = {**self._model_kwargs, "user": user_id}
                 llm = ChatOpenAI(**self._llm_kwargs, model_kwargs=model_kwargs)
 
-            # Retrieve the most relevant snippets stored in memory to ground the response.
             history_snippets = memory.get_relevant_history(prompt)
             if history_snippets:
                 system_message = f"{self._system_prompt}\n\nContext:\n{history_snippets}"
@@ -136,3 +139,35 @@ class LLMService:
             from ..utils.error_handler import ChatError
 
             raise ChatError("LLM generation failed") from exc
+
+    # ------------------------------------------------------------------
+    # Token accounting helpers
+
+    def count_tokens(self, messages: list[ChatMessage]) -> int:
+        """Return token usage for a sequence of chat messages.
+
+        Falls back to a simple character-based heuristic if the underlying
+        model does not expose token counting utilities.
+        """
+        if not messages:
+            return 0
+
+        if hasattr(self.llm, "get_num_tokens_from_messages"):
+            lc_messages = []
+            for message in messages:
+                role = message.role
+                content = message.content
+                if role == MessageRole.USER:
+                    lc_messages.append(HumanMessage(content=content))
+                elif role == MessageRole.ASSISTANT:
+                    lc_messages.append(AIMessage(content=content))
+                else:
+                    lc_messages.append(SystemMessage(content=content))
+            try:
+                return int(self.llm.get_num_tokens_from_messages(lc_messages))
+            except Exception:
+                # Fall through to heuristic if token counting fails
+                pass
+
+        # Simple heuristic: average of 4 characters per token with minimum of 1
+        return sum(max(1, math.ceil(len(message.content) / 4)) for message in messages)
