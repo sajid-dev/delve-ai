@@ -9,13 +9,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from .utils.logger import configure_logger
+from .utils.logger import setup_logging
 # Import settings from the src.config package.  The configuration files
 # have been moved under the `src/config` directory, so we import
 # Settings and helpers relative to this package.
 # Load application configuration for logging.  The application and LLM
 # settings have been separated into dedicated config modules.
-from .config.app_config import get_app_config
+from .config.app_config import app_config  # noqa: F401
 from .controllers.chat_controller import router as chat_router
 from .utils.error_handler import ChatError, http_exception_handler
 
@@ -23,11 +23,8 @@ from .utils.error_handler import ChatError, http_exception_handler
 def create_app() -> FastAPI:
     """Create and configure a FastAPI application."""
     # Configure structured logging using application settings
-    app_config = get_app_config()
-    configure_logger(
-        log_file=app_config.log_file,
-        level=app_config.log_level,
-    )
+    # Calling setup_logging() initialises Loguru with console and file sinks.
+    setup_logging()
 
     app = FastAPI(title="LLM Chat App", version="0.1.0")
 

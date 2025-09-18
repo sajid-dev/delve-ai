@@ -10,27 +10,31 @@ from __future__ import annotations
 
 from loguru import logger
 from langchain.memory import VectorStoreRetrieverMemory
-from langchain.vectorstores import Chroma
+# Import the Chroma vector store from the dedicated integration package.
+from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 
 from ..config.llm_config import LlmConfig
 
 
 class ChatMemory:
-    """Persisted memory for storing and retrieving conversation context."""
+    """Persisted memory for storing and retrieving conversation context.
 
-    def __init__(self, llm_config: LlmConfig) -> None:
-        """Initialise embeddings and the persistent vector store.
+    A ChatMemory instance encapsulates a Chroma vector store and a LangChain
+    ``VectorStoreRetrieverMemory``.  It can be scoped to a particular user
+    and conversation by specifying a ``persist_directory``.  This allows
+    each conversation to maintain its own independent context stored on
+    disk.  If no directory is provided, the default ``chroma_db`` root will
+    be used.  Any exceptions during initialisation (for example, missing
+    API keys or filesystem errors) are caught and re‑raised as
+    :class:`ChatError` to provide a consistent error surface.
+    """
 
-        The memory relies on embeddings to convert text into vector
-        representations.  Here we instantiate :class:`OpenAIEmbeddings` using
-        the unified LLM configuration.  The ``api_key`` and optional
-        ``base_url`` are passed through so that both OpenAI and custom
-        ChatGPT‑compatible endpoints are supported【149861662473305†L170-L184】.  Any
-        exceptions during initialisation (for example, missing API keys or
-        filesystem errors) are caught and re‑raised as :class:`ChatError` to
-        provide a consistent error surface.
-        """
+    def __init__(self, llm_config: LlmConfig, persist_directory: str | None = None) -> None:
+        # Determine the directory where vectors will be persisted.  Use a
+        # conversation‑specific path if supplied, otherwise fall back to
+        # the global ``chroma_db`` folder.
+        directory = persist_directory or "chroma_db"
         try:
             # Initialise the embedding model using the unified API key and base URL.
             embed_kwargs: dict[str, object] = {
@@ -40,9 +44,9 @@ class ChatMemory:
                 embed_kwargs["base_url"] = llm_config.base_url
             embeddings = OpenAIEmbeddings(**embed_kwargs)
 
-            # Create a persistent Chroma vector store using the embeddings.
+            # Create a persistent Chroma vector store using the embeddings and per‑conversation directory.
             self.vectorstore = Chroma(
-                persist_directory="chroma_db",
+                persist_directory=directory,
                 embedding_function=embeddings,
             )
             retriever = self.vectorstore.as_retriever(search_kwargs={"k": 5})

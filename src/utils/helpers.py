@@ -13,9 +13,9 @@ def log_execution(func: Callable[..., T]) -> Callable[..., T]:
     """Decorator to log the execution of a function."""
 
     def wrapper(*args: Any, **kwargs: Any) -> T:
-        logger.debug("Entering %s", func.__name__)
+        logger.debug("Entering {}", func.__name__)
         result = func(*args, **kwargs)
-        logger.debug("Exiting %s", func.__name__)
+        logger.debug("Exiting {}", func.__name__)
         return result
 
     return wrapper

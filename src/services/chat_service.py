@@ -15,6 +15,8 @@ from ..config.llm_config import LlmConfig, get_llm_config
 from ..config.app_config import AppConfig, get_app_config
 from ..models.chat_response import ChatResponse
 from ..models.chat_request import ChatRequest
+from ..models.conversation import Conversation
+import uuid
 from ..utils.error_handler import ChatError
 from .memory_service import MemoryService
 from .llm_service import LLMService
@@ -36,41 +38,114 @@ class ChatService:
         self.memory_service = MemoryService(llm_config=self.llm_config)
         self.llm_service = LLMService(llm_config=self.llm_config)
 
-    def chat(self, prompt: str) -> str:
-        """Generate a reply to the user prompt.
+    def chat(self, chat_request: ChatRequest) -> ChatResponse:
+        """Generate a reply to a chat request.
 
-        This method retrieves prior conversation context via the memory
-        service, invokes the LLM for a new answer and persists the
-        interaction back into memory.
+        This method handles multi‑user, multi‑conversation contexts.  It
+        generates new user and conversation identifiers when they are not
+        provided, retrieves or initialises the appropriate memory, asks
+        the LLM for a response, persists the interaction and updates
+        conversation metadata.  A :class:`ChatResponse` containing the
+        answer and identifiers is returned.
 
         Parameters
         ----------
-        prompt: str
-            The user's message to send to the LLM.
+        chat_request: ChatRequest
+            The incoming chat request containing the message and optional
+            user and conversation identifiers.
 
         Returns
         -------
-        str
-            The assistant's reply.
+        ChatResponse
+            A response with the assistant's answer and identifiers.
 
         Raises
         ------
         ChatError
-            If an exception occurs while querying the LLM.
+            If any exception occurs during processing.
         """
-        logger.info("Processing chat for prompt: %s", prompt)
+        logger.info("Processing chat for request: {}", chat_request)
         try:
-            # Retrieve underlying memory
-            chat_memory = self.memory_service.get_memory()
-            # Generate answer using LLM and current memory
-            answer = self.llm_service.generate(prompt, memory=chat_memory)
-            # Save the interaction for future context
-            self.memory_service.save_interaction(prompt, answer)
-            return answer
+            # Determine or generate user and conversation identifiers
+            user_id = chat_request.user_id or str(uuid.uuid4())
+            conversation_id = chat_request.conversation_id or str(uuid.uuid4())
+
+            # Retrieve memory for this user and conversation
+            chat_memory = self.memory_service.get_memory(user_id, conversation_id)
+            # Generate an answer using the LLM and current memory
+            answer_text = self.llm_service.generate(
+                chat_request.message,
+                memory=chat_memory,
+                user_id=user_id,
+            )
+            # Persist the interaction (both question and answer) and update metadata
+            self.memory_service.save_interaction(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                question=chat_request.message,
+                answer=answer_text,
+            )
+            # Set conversation title on first message if missing
+            conversation = self.memory_service.get_conversation(user_id, conversation_id)
+            if conversation and conversation.title is None and conversation.message_count == 2:
+                # Use the user's first message as title, truncated to 60 chars
+                title = chat_request.message.strip()
+                conversation.title = title[:60]
+            # Return response
+            return ChatResponse(user_id=user_id, conversation_id=conversation_id, answer=answer_text)
         except Exception as exc:
             logger.exception("LLM processing failed")
-            # Wrap the error in our custom exception
             raise ChatError("LLM processing failed") from exc
+
+    # ------------------------------------------------------------------
+    # Conversation management API
+
+    def list_conversations(self, user_id: str) -> list[Conversation]:
+        """Return all conversations for a user."""
+        return self.memory_service.list_conversations(user_id)
+
+    def get_conversation(self, user_id: str, conversation_id: str) -> Conversation | None:
+        """Return a specific conversation for a user if it exists."""
+        return self.memory_service.get_conversation(user_id, conversation_id)
+
+    def delete_conversation(self, user_id: str, conversation_id: str) -> None:
+        """Delete a conversation for a user."""
+        self.memory_service.delete_conversation(user_id, conversation_id)
+
+    def delete_all_conversations(self, user_id: str) -> None:
+        """Delete all conversations for a user."""
+        self.memory_service.delete_all_conversations(user_id)
+
+    # ------------------------------------------------------------------
+    # Health and service info
+
+    def health_check(self) -> dict[str, str]:
+        """Return a simple health status for the chat service.
+
+        This method can be used by higher-level controllers to verify
+        that the service and its dependencies are reachable.  It
+        currently returns a static status but could be extended to
+        perform checks against the LLM and memory backends.
+        """
+        try:
+            # We could add more sophisticated checks here (e.g. ping the LLM)
+            return {"status": "ok"}
+        except Exception:
+            return {"status": "unhealthy"}
+
+    def get_service_info(self) -> dict[str, object]:
+        """Return basic information about the chat service.
+
+        Provides configuration details such as the LLM model name and
+        tuning parameters.  This can be useful for UI components to
+        display the current backend configuration.
+        """
+        return {
+            "model": self.llm_config.model,
+            "temperature": self.llm_config.temperature,
+            "max_tokens": self.llm_config.max_tokens,
+            "timeout": self.llm_config.timeout,
+        }
 
 
 @lru_cache()

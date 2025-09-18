@@ -1,50 +1,57 @@
-"""Application configuration definitions.
-
-This module defines simple Pydantic models for high‑level
-application settings.  They are separated from environment
-loading logic so that values can be composed from multiple
-sources if desired.
-"""
-
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class AppConfig(BaseSettings):
-    """Application-level configuration settings.
+    """Application configuration settings."""
 
-    This class centralises settings that apply to the overall
-    application rather than the LLM.  These include environment
-    settings, host/port configuration, memory backend selection and
-    logging.  Values are loaded from environment variables or a
-    `.env` file and can be overridden via environment.
-    """
+    # Environment
+    app_env: str = Field("development")
+    app_debug: bool = Field(False)
+    app_host: str = Field("0.0.0.0")
+    app_port: int = Field(8501)
 
-    # Metadata
-    app_name: str = "LLM Chat App"
-    api_prefix: str = ""
+    # Logging
+    log_level: str = Field("INFO")
+    log_file: Optional[str] = Field(None)
 
-    # Application environment settings
-    app_env: str = "development"
-    app_debug: bool = True
-    app_host: str = "0.0.0.0"
-    app_port: int = 8501
+    # Memory
+    memory_type: str = Field("in_memory")
+    redis_url: Optional[str] = Field(None)
 
-    # Memory backend configuration
-    memory_type: str = "in_memory"
-    redis_url: str | None = None
+    @field_validator("app_env")
+    def validate_app_env(cls, value: str) -> str:
+        if value not in ["development", "staging", "production"]:
+            raise ValueError("APP_ENV must be development, staging, or production")
+        return value
 
-    # Logging configuration
-    log_level: str = "INFO"
-    log_file: str = "logs/app.log"
+    @field_validator("memory_type")
+    def validate_memory_type(cls, value: str) -> str:
+        if value not in ["in_memory", "redis"]:
+            raise ValueError("MEMORY_TYPE must be in_memory or redis")
+        return value
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    @field_validator("log_level")
+    def validate_log_level(cls, value: str) -> str:
+        level = value.upper()
+        if level not in ["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"]:
+            raise ValueError("LOG_LEVEL must be a valid Loguru level")
+        return level
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+# Global configuration instance
+app_config = AppConfig()
 
 
 @lru_cache()
 def get_app_config() -> AppConfig:
-    """Return a cached AppConfig instance.
+    """Return a cached application configuration instance."""
 
-    The result is cached to avoid re-reading environment variables on each call.
-    """
-    return AppConfig()  # type: ignore[arg-type]
+    return AppConfig()

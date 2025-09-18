@@ -12,35 +12,77 @@ from loguru import logger
 
 from ..config.llm_config import LlmConfig, get_llm_config
 from ..memory.chat_memory import ChatMemory
+from ..memory.user_memory_manager import UserMemoryManager
+from ..models.conversation import Conversation
+from ..models.chat_message import ChatMessage
+from ..models.enums import MessageRole
 
 
 class MemoryService:
-    """A high‑level interface over a chat memory implementation."""
+    """High‑level interface over per‑user, per‑conversation memory.
+
+    This service delegates to :class:`UserMemoryManager` to provide
+    isolated memories and conversation metadata for each user and
+    conversation.  It exposes methods to obtain a memory, persist
+    interactions and manage conversations.
+    """
 
     def __init__(self, llm_config: LlmConfig | None = None) -> None:
         # Load LLM configuration if none provided
         self.llm_config = llm_config or get_llm_config()
-        # For now we maintain a single ChatMemory instance.  A future
-        # improvement could be to delegate to a UserMemoryManager to provide
-        # per‑user memory isolation.
-        self.chat_memory = ChatMemory(llm_config=self.llm_config)
+        # Initialise the user memory manager
+        self._manager = UserMemoryManager(llm_config=self.llm_config)
 
-    def save_interaction(self, question: str, answer: str) -> None:
-        """Persist a question/answer pair into the memory.
+    def get_memory(self, user_id: str, conversation_id: str) -> ChatMemory:
+        """Return a ChatMemory scoped to a user's conversation."""
+        return self._manager.get_memory(user_id, conversation_id)
 
-        Any exception raised by the underlying memory implementation is
-        caught and re-raised as a ChatError.  This protects callers from
-        unexpected errors.
+    def save_interaction(self, user_id: str, conversation_id: str, question: str, answer: str) -> None:
+        """Persist a question/answer pair into a user's conversation memory.
+
+        A corresponding chat message entry is added to the conversation
+        metadata for both the user and assistant.  Timestamps are
+        generated automatically.
         """
-        logger.debug("Saving interaction to memory: Q=%r A=%r", question, answer)
+        logger.debug(
+            "Saving interaction to memory: user={} conv={} Q={!r} A={!r}",
+            user_id,
+            conversation_id,
+            question,
+            answer,
+        )
         try:
-            self.chat_memory.save_interaction(question, answer)
+            memory = self.get_memory(user_id, conversation_id)
+            # Save to vector store (only the assistant side is persisted since
+            # questions and answers are passed separately below via embeddings)
+            memory.save_interaction(question, answer)
+            # Update conversation metadata with explicit chat messages
+            from datetime import datetime
+            # Create ChatMessage objects with timestamps
+            user_msg = ChatMessage(role=MessageRole.USER, content=question, timestamp=datetime.utcnow().isoformat())
+            assistant_msg = ChatMessage(role=MessageRole.ASSISTANT, content=answer, timestamp=datetime.utcnow().isoformat())
+            # Create conversation record if needed
+            self._manager.create_conversation(user_id, conversation_id)
+            # Append messages to conversation metadata
+            self._manager.add_message(user_id, conversation_id, user_msg)
+            self._manager.add_message(user_id, conversation_id, assistant_msg)
         except Exception as exc:
             logger.exception("Failed to save interaction to memory")
             from ..utils.error_handler import ChatError
-
             raise ChatError("Failed to save interaction") from exc
 
-    def get_memory(self) -> ChatMemory:
-        """Expose the underlying chat memory object."""
-        return self.chat_memory
+    def list_conversations(self, user_id: str) -> list[Conversation]:
+        """Return a list of all conversations for a user."""
+        return self._manager.list_conversations(user_id)
+
+    def get_conversation(self, user_id: str, conversation_id: str) -> Conversation | None:
+        """Return a single conversation metadata record."""
+        return self._manager.get_conversation(user_id, conversation_id)
+
+    def delete_conversation(self, user_id: str, conversation_id: str) -> None:
+        """Delete a conversation and its memory."""
+        self._manager.delete_conversation(user_id, conversation_id)
+
+    def delete_all_conversations(self, user_id: str) -> None:
+        """Delete all conversations for a user."""
+        self._manager.delete_all_conversations(user_id)
