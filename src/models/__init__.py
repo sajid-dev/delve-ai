@@ -13,4 +13,4 @@ from .chat_response import ChatResponse  # noqa: F401
 from .conversation import Conversation  # noqa: F401
 from .chat_message import ChatMessage  # noqa: F401
 from .user_memory import UserMemory  # noqa: F401
-from .enums import MessageRole  # noqa: F401
+from .enums import MessageContentType, MessageRole  # noqa: F401

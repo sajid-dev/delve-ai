@@ -1,7 +1,7 @@
 """Models representing chat messages and related structures."""
 
 from pydantic import BaseModel
-from .enums import MessageRole
+from .enums import MessageContentType, MessageRole
 
 
 class ChatMessage(BaseModel):
@@ -17,4 +17,5 @@ class ChatMessage(BaseModel):
 
     role: MessageRole
     content: str
+    content_type: MessageContentType = MessageContentType.TEXT
     timestamp: str | None = None

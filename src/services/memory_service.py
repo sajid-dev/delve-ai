@@ -15,7 +15,7 @@ from ..memory.chat_memory import ChatMemory
 from ..memory.user_memory_manager import UserMemoryManager
 from ..models.conversation import Conversation
 from ..models.chat_message import ChatMessage
-from ..models.enums import MessageRole
+from ..models.enums import MessageContentType, MessageRole
 
 
 class MemoryService:
@@ -37,7 +37,16 @@ class MemoryService:
         """Return a ChatMemory scoped to a user's conversation."""
         return self._manager.get_memory(user_id, conversation_id)
 
-    def save_interaction(self, user_id: str, conversation_id: str, question: str, answer: str) -> None:
+    def save_interaction(
+        self,
+        user_id: str,
+        conversation_id: str,
+        question: str,
+        answer: str,
+        *,
+        question_type: MessageContentType = MessageContentType.TEXT,
+        answer_type: MessageContentType = MessageContentType.TEXT,
+    ) -> None:
         """Persist a question/answer pair into a user's conversation memory.
 
         A corresponding chat message entry is added to the conversation
@@ -59,8 +68,18 @@ class MemoryService:
             # Update conversation metadata with explicit chat messages
             from datetime import datetime
             # Create ChatMessage objects with timestamps
-            user_msg = ChatMessage(role=MessageRole.USER, content=question, timestamp=datetime.utcnow().isoformat())
-            assistant_msg = ChatMessage(role=MessageRole.ASSISTANT, content=answer, timestamp=datetime.utcnow().isoformat())
+            user_msg = ChatMessage(
+                role=MessageRole.USER,
+                content=question,
+                content_type=question_type,
+                timestamp=datetime.utcnow().isoformat(),
+            )
+            assistant_msg = ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=answer,
+                content_type=answer_type,
+                timestamp=datetime.utcnow().isoformat(),
+            )
             # Create conversation record if needed
             self._manager.create_conversation(user_id, conversation_id)
             # Append messages to conversation metadata

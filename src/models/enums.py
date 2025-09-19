@@ -15,3 +15,16 @@ class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
+
+
+class MessageContentType(str, Enum):
+    """Enum describing the content type of a chat message for frontend rendering."""
+
+    TEXT = "text"
+    MARKDOWN = "markdown"
+    CODE = "code"
+    TABLE = "table"
+    IMAGE = "image"
+    JSON = "json"
+    HTML = "html"
+    CHART = "chart"

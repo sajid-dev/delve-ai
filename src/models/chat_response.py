@@ -1,6 +1,8 @@
 """Response model for the chat API."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from .enums import MessageContentType
 
 
 class ChatResponse(BaseModel):
@@ -14,3 +16,7 @@ class ChatResponse(BaseModel):
     user_id: str
     conversation_id: str
     answer: str
+    content_type: MessageContentType = Field(
+        default=MessageContentType.TEXT,
+        description="Classification of the assistant's answer content.",
+    )
