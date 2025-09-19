@@ -1,7 +1,7 @@
 """API controller for chat operations.
 
 Defines the routes for interacting with the ChatService.  All
-endpoints defined here are registered in ``main.py``.
+endpoints defined here are registered in ``gi.py``.
 """
 
 """Controllers for chat endpoints."""

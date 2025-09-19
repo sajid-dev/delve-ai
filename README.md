@@ -9,7 +9,7 @@ The **delve‑ai** backend is designed as a production‑ready foundation for en
 ### Core API endpoints
 
 - **Chat endpoint** – `POST /chat` accepts a prompt and returns an AI response.
-- **Admin dashboard** – `GET /admin/dashboard` reports per-user conversations with aggregated token usage.
+- **Admin dashboard** – `GET /admin/dashboard` reports per-user conversations with token counts, user totals, and active-user metrics.
 - **Health check** – `GET /health` responds with the current health of the service.
 - **LangChain integration** – uses `langchain` and `langchain‑openai` for conversation chains backed by a `ChromaDB` vector store.
 - **Structured logging** – uses Loguru with log rotation and retention to persist logs in `logs/app.log`.
@@ -165,6 +165,11 @@ Below is an overview of additional features supported by the architecture.  Item
    cp .env.example .env
    # Then edit .env and set LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, etc.
    ```
+
+   To expose Model Context Protocol (MCP) tools to the assistant, set
+   `LLM_MCP_ENABLED=true` and configure `LLM_MCP_SERVER_COMMAND` (plus optional
+   args/env) so the backend can launch your MCP server.  You can set
+   `LLM_MCP_TRIGGER_KEYWORDS` to control which questions route through MCP tools.
 
 4. **Run the server**.  If you're using uv, you can run the FastAPI application directly in the uv-managed environment:
 
@@ -338,3 +343,39 @@ Deletes a specific conversation for a user.  Requires both the `conversation_id`
 ### `DELETE /conversations`
 
 Deletes all conversations for a user.  Requires the `user_id` query parameter.  Returns a 204 No Content response on success.
+
+### `GET /admin/dashboard`
+
+Provides aggregated analytics across every user.  Useful for an admin dashboard or operational reporting.
+
+**Response (200):**
+
+```json
+{
+  "total_users": 3,
+  "active_users": 2,
+  "total_conversations": 12,
+  "total_tokens": 5475,
+  "users": [
+    {
+      "user_id": "123e4567-e89b-12d3-a456-426614174000",
+      "conversation_count": 4,
+      "total_tokens": 2200,
+      "last_active": "2025-09-19T08:30:00Z",
+      "is_active": true,
+      "conversations": [
+        {
+          "conversation_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
+          "title": "Hello, who are you?",
+          "message_count": 6,
+          "created_at": "2025-09-17T10:00:00Z",
+          "updated_at": "2025-09-19T08:30:00Z",
+          "tokens_used": 640
+        }
+      ]
+    }
+  ]
+}
+```
+
+`active_users` counts the number of users who have interacted with the system in the last 24 hours (`is_active` flag in each user entry).  `last_active` captures the most recent conversation update for the user.

@@ -14,6 +14,7 @@ dependencies = [
     "langchain-chroma>=0.2.6",      # Chroma vector store integration
     "langchain-community>=0.3.29",  # Community-maintained LangChain components
     "langchain-openai>=0.3.33",     # OpenAI-compatible chat/embedding clients
+    "langchain-mcp>=0.2.1",         # MCP client integration for LangChain tools
     "loguru>=0.7.3",                # Structured logging
     "pydantic>=2.11.9",             # Data validation for request/response models
     "pydantic-settings>=2.10.1",    # Environment-driven configuration loader
