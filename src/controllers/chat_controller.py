@@ -50,80 +50,80 @@ async def chat_endpoint(
         ) from exc
 
 
-@router.get("/conversations", response_model=list[Conversation])
-async def list_conversations_endpoint(
+@router.get("/sessions", response_model=list[Conversation])
+async def list_sessions_endpoint(
     user_id: str,
     service: ChatService = Depends(get_chat_service),
 ) -> list[Conversation]:
-    """List all conversations for a user.
+    """List all sessions for a user.
 
     The ``user_id`` query parameter is required.  Returns a list of
-    conversation metadata objects.  An empty list is returned if the
-    user has no conversations.
+    session metadata objects.  An empty list is returned if the
+    user has no sessions.
     """
     try:
-        logger.info("Listing conversations for user: {}", user_id)
-        return service.list_conversations(user_id)
+        logger.info("Listing sessions for user: {}", user_id)
+        return service.list_sessions(user_id)
     except Exception as exc:
-        logger.exception("Failed to list conversations")
+        logger.exception("Failed to list sessions")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list conversations",
+            detail="Failed to list sessions",
         ) from exc
 
 
-@router.get("/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation_endpoint(
-    conversation_id: str,
+@router.get("/sessions/{session_id}", response_model=Conversation)
+async def get_session_endpoint(
+    session_id: str,
     user_id: str,
     service: ChatService = Depends(get_chat_service),
 ) -> Conversation:
-    """Retrieve a single conversation for a user."""
+    """Retrieve a single session for a user."""
     try:
-        conv = service.get_conversation(user_id, conversation_id)
+        conv = service.get_session(user_id, session_id)
         if conv is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
         return conv
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("Failed to get conversation")
+        logger.exception("Failed to get session")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get conversation",
+            detail="Failed to get session",
         ) from exc
 
 
-@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_conversation_endpoint(
-    conversation_id: str,
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session_endpoint(
+    session_id: str,
     user_id: str,
     service: ChatService = Depends(get_chat_service),
 ) -> None:
-    """Delete a specific conversation for a user."""
+    """Delete a specific session for a user."""
     try:
-        service.delete_conversation(user_id, conversation_id)
+        service.delete_session(user_id, session_id)
         return None
     except Exception as exc:
-        logger.exception("Failed to delete conversation")
+        logger.exception("Failed to delete session")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete conversation",
+            detail="Failed to delete session",
         ) from exc
 
 
-@router.delete("/conversations", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_all_conversations_endpoint(
+@router.delete("/sessions", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_sessions_endpoint(
     user_id: str,
     service: ChatService = Depends(get_chat_service),
 ) -> None:
-    """Delete all conversations for a user."""
+    """Delete all sessions for a user."""
     try:
-        service.delete_all_conversations(user_id)
+        service.delete_all_sessions(user_id)
         return None
     except Exception as exc:
-        logger.exception("Failed to delete all conversations")
+        logger.exception("Failed to delete all sessions")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete conversations",
+            detail="Failed to delete sessions",
         ) from exc

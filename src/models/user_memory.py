@@ -1,4 +1,4 @@
-"""Data structure to hold a user's memory across conversations."""
+"""Data structure to hold a user's memory across sessions."""
 
 from typing import Dict
 
@@ -8,6 +8,6 @@ from .conversation import Conversation
 
 
 class UserMemory(BaseModel):
-    """Stores conversations keyed by user ID."""
+    """Stores sessions keyed by user ID."""
 
-    conversations: Dict[str, Conversation] = Field(default_factory=dict)
+    sessions: Dict[str, Conversation] = Field(default_factory=dict)

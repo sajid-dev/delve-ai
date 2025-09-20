@@ -1,4 +1,4 @@
-"""Model representing a full conversation."""
+"""Model representing a full session."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from .chat_message import ChatMessage
 
 
 class Conversation(BaseModel):
-    """Represents a conversation between a user and the assistant.
+    """Represents a session between a user and the assistant.
 
-    A conversation has a unique identifier scoped to a user.  It also
+    A session has a unique identifier scoped to a user.  It also
     records metadata such as creation and last updated times, an
     optional user-provided title, and a count of messages exchanged.
     The ``messages`` field contains the chronological sequence of
@@ -20,27 +20,27 @@ class Conversation(BaseModel):
     formatted as ISO 8601 strings in UTC.
     """
 
-    conversation_id: str = Field(..., description="Unique identifier for the conversation.")
-    user_id: str = Field(..., description="Identifier of the user who owns this conversation.")
+    session_id: str = Field(..., description="Unique identifier for the session.")
+    user_id: str = Field(..., description="Identifier of the user who owns this session.")
     title: Optional[str] = Field(
         default=None,
-        description="Optional title assigned to the conversation.  Can be derived from the first prompt."
+        description="Optional title assigned to the session.  Can be derived from the first prompt."
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.utcnow(),
-        description="Timestamp when the conversation was created (UTC)."
+        description="Timestamp when the session was created (UTC)."
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.utcnow(),
-        description="Timestamp when the conversation was last updated (UTC)."
+        description="Timestamp when the session was last updated (UTC)."
     )
     message_count: int = Field(
         default=0,
-        description="Number of messages exchanged in the conversation."
+        description="Number of messages exchanged in the session."
     )
     messages: List[ChatMessage] = Field(
         default_factory=list,
-        description="Chronological list of messages in the conversation."
+        description="Chronological list of messages in the session."
     )
 
     def add_message(self, message: ChatMessage) -> None:

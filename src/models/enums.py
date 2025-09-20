@@ -28,3 +28,4 @@ class MessageContentType(str, Enum):
     JSON = "json"
     HTML = "html"
     CHART = "chart"
+    LIST = "list"

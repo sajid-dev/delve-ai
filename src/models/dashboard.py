@@ -9,25 +9,26 @@ from pydantic import BaseModel
 
 
 class ConversationStats(BaseModel):
-    """Analytics for a single conversation."""
+    """Analytics for a single session."""
 
-    conversation_id: str
+    session_id: str
     title: str | None
     message_count: int
     created_at: datetime
     updated_at: datetime
     tokens_used: int
+    latest_answer: dict[str, object] | None = None
 
 
 class UserConversationStats(BaseModel):
-    """Aggregated analytics for a user's conversations."""
+    """Aggregated analytics for a user's sessions."""
 
     user_id: str
-    conversation_count: int
+    session_count: int
     total_tokens: int
     last_active: datetime | None
     is_active: bool
-    conversations: List[ConversationStats]
+    sessions: List[ConversationStats]
 
 
 class DashboardData(BaseModel):
@@ -35,6 +36,6 @@ class DashboardData(BaseModel):
 
     total_users: int
     active_users: int
-    total_conversations: int
+    total_sessions: int
     total_tokens: int
     users: List[UserConversationStats]

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     """Represents a request payload for a chat message.
 
-    This model supports multi‑user, multi‑conversation scenarios.  The
+    This model supports multi-user, multi-session scenarios.  The
     ``message`` field contains the user's prompt.  Optional ``user_id``
     and ``session_id`` fields allow clients to specify an existing
     user and session; if omitted a new user or session will
