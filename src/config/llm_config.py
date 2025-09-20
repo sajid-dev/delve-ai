@@ -1,12 +1,14 @@
 from functools import lru_cache
-import shlex
-from typing import Literal, Optional
+from typing import Optional
 
-from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .mcp_config import McpConfig, get_mcp_config
 
 load_dotenv()
+
 
 class LlmConfig(BaseSettings):
     """Configuration settings for language model integrations."""
@@ -17,13 +19,12 @@ class LlmConfig(BaseSettings):
     temperature: float = Field(0.7, alias="LLM_TEMPERATURE")
     max_tokens: Optional[int] = Field(None, alias="LLM_MAX_TOKENS")
     timeout: int = Field(30, alias="LLM_TIMEOUT")
-    mcp_enabled: bool = Field(False, alias="LLM_MCP_ENABLED")
-    mcp_transport: Literal["stdio"] = Field("stdio", alias="LLM_MCP_TRANSPORT")
-    mcp_server_command: Optional[str] = Field(None, alias="LLM_MCP_SERVER_COMMAND")
-    mcp_server_args: list[str] = Field(default_factory=list, alias="LLM_MCP_SERVER_ARGS")
-    mcp_server_env: Optional[dict[str, str]] = Field(None, alias="LLM_MCP_SERVER_ENV")
-    mcp_server_cwd: Optional[str] = Field(None, alias="LLM_MCP_SERVER_CWD")
-    mcp_trigger_keywords: list[str] = Field(default_factory=list, alias="LLM_MCP_TRIGGER_KEYWORDS")
+    mcp: McpConfig = Field(default_factory=get_mcp_config)
+
+    def _update_mcp_fields(self, **updates: object) -> None:
+        data = self.mcp.model_dump()
+        data.update(updates)
+        self.mcp = McpConfig(**data)
 
     @field_validator("temperature")
     def validate_temperature(cls, value: float) -> float:
@@ -43,30 +44,29 @@ class LlmConfig(BaseSettings):
             raise ValueError("LLM_MAX_TOKENS must be positive")
         return value
 
-    @field_validator("mcp_server_args", mode="before")
-    def parse_mcp_args(cls, value: list[str] | str) -> list[str]:
-        if isinstance(value, list):
-            return value
-        if not value:
-            return []
-        return shlex.split(value)
+    @property
+    def mcp_enabled(self) -> bool:
+        return self.mcp.enabled
 
-    @field_validator("mcp_trigger_keywords", mode="before")
-    def parse_trigger_keywords(cls, value: list[str] | str) -> list[str]:
-        if isinstance(value, list):
-            return value
-        if not value:
-            return []
-        return [part.strip() for part in value.replace(",", " ").split() if part.strip()]
+    @mcp_enabled.setter
+    def mcp_enabled(self, value: bool) -> None:
+        self._update_mcp_fields(enabled=value)
 
-    @model_validator(mode="after")
-    def validate_mcp_config(self) -> "LlmConfig":
-        if self.mcp_enabled:
-            if self.mcp_transport != "stdio":
-                raise ValueError("Only 'stdio' MCP transport is currently supported")
-            if not self.mcp_server_command:
-                raise ValueError("LLM_MCP_SERVER_COMMAND must be provided when MCP is enabled")
-        return self
+    @property
+    def mcp_transport(self) -> str:
+        return self.mcp.transport
+
+    @mcp_transport.setter
+    def mcp_transport(self, value: str) -> None:
+        self._update_mcp_fields(transport=value)
+
+    @property
+    def mcp_trigger_keywords(self) -> list[str]:
+        return self.mcp.trigger_keywords
+
+    @mcp_trigger_keywords.setter
+    def mcp_trigger_keywords(self, value: list[str]) -> None:
+        self._update_mcp_fields(trigger_keywords=value)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 

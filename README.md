@@ -167,9 +167,28 @@ Below is an overview of additional features supported by the architecture.  Item
    ```
 
    To expose Model Context Protocol (MCP) tools to the assistant, set
-   `LLM_MCP_ENABLED=true` and configure `LLM_MCP_SERVER_COMMAND` (plus optional
-   args/env) so the backend can launch your MCP server.  You can set
-   `LLM_MCP_TRIGGER_KEYWORDS` to control which questions route through MCP tools.
+   `MCP_ENABLED=true` and populate `MCP_SERVERS` with a JSON array of server
+   definitions. Each entry supports `command`, `args`, `env`, `cwd` and optional
+   `trigger_keywords` for per-server routing. For example, to enable the
+   open-source Shadcn UI MCP server alongside a custom toolchain:
+
+   ```bash
+   MCP_ENABLED=true
+   MCP_SERVERS='[
+     {"name":"analysis","command":"/opt/tools/mcp-analytics","args":["--mode","batch"]},
+     {"name":"shadcn-ui","command":"npx","args":["@modelcontextprotocol/server-shadcn"],
+      "trigger_keywords":["ui","component","shadcn"]}
+   ]'
+   ```
+
+   The legacy `LLM_MCP_ENABLED`, `LLM_MCP_TRANSPORT`, `LLM_MCP_TRIGGER_KEYWORDS`
+   and `LLM_MCP_SERVERS` variables are still honoured for backward compatibility,
+   but new deployments should prefer the streamlined `MCP_*` names.
+
+   Under the hood the backend now relies on LangChain's `langchain-mcp` toolkit
+   together with `langchain-mcp-adapters` to negotiate and multiplex MCP
+   sessions, so make sure both packages are installed when running outside the
+   provided virtual environment.
 
 4. **Run the server**.  If you're using uv, you can run the FastAPI application directly in the uv-managed environment:
 
