@@ -46,8 +46,8 @@ class ChatService:
     def chat(self, chat_request: ChatRequest) -> ChatResponse:
         """Generate a reply to a chat request.
 
-        This method handles multi‑user, multi‑conversation contexts.  It
-        generates new user and conversation identifiers when they are not
+        This method handles multi‑user, multi‑session contexts.  It
+        generates new user and session identifiers when they are not
         provided, retrieves or initialises the appropriate memory, asks
         the LLM for a response, persists the interaction and updates
         conversation metadata.  A :class:`ChatResponse` containing the
@@ -71,30 +71,32 @@ class ChatService:
         """
         logger.info("Processing chat for request: {}", chat_request)
         try:
-            # Determine or generate user and conversation identifiers
+            # Determine or generate user and session identifiers
             user_id = chat_request.user_id or str(uuid.uuid4())
-            conversation_id = chat_request.conversation_id or str(uuid.uuid4())
+            session_id = chat_request.session_id or str(uuid.uuid4())
+            chat_request.session_id = session_id
 
             # Retrieve memory for this user and conversation
-            chat_memory = self.memory_service.get_memory(user_id, conversation_id)
+            chat_memory = self.memory_service.get_memory(user_id, session_id)
             # Generate an answer using the LLM and current memory
             answer_text = self.llm_service.generate(
                 chat_request.message,
                 memory=chat_memory,
                 user_id=user_id,
+                session_id=session_id,
             )
             answer_type = self._detect_content_type(answer_text)
             # Persist the interaction (both question and answer) and update metadata
             self.memory_service.save_interaction(
                 user_id=user_id,
-                conversation_id=conversation_id,
+                conversation_id=session_id,
                 question=chat_request.message,
                 answer=answer_text,
                 question_type=MessageContentType.TEXT,
                 answer_type=answer_type,
             )
             # Set conversation title on first message if missing
-            conversation = self.memory_service.get_conversation(user_id, conversation_id)
+            conversation = self.memory_service.get_conversation(user_id, session_id)
             if conversation and conversation.title is None and conversation.message_count == 2:
                 # Use the user's first message as title, truncated to 60 chars
                 title = chat_request.message.strip()
@@ -102,7 +104,7 @@ class ChatService:
             # Return response
             return ChatResponse(
                 user_id=user_id,
-                conversation_id=conversation_id,
+                session_id=session_id,
                 answer=answer_text,
                 content_type=answer_type,
             )

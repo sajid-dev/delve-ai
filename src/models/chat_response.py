@@ -14,7 +14,10 @@ class ChatResponse(BaseModel):
     """
 
     user_id: str
-    conversation_id: str
+    session_id: str = Field(
+        ...,
+        description="Identifier for the session tied to this response.",
+    )
     answer: str
     content_type: MessageContentType = Field(
         default=MessageContentType.TEXT,

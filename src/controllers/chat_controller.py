@@ -25,10 +25,10 @@ async def chat_endpoint(
 ) -> ChatResponse:
     """Accept a chat request and return the assistant's response.
 
-    The request may include optional ``user_id`` and ``conversation_id``
+    The request may include optional ``user_id`` and ``session_id``
     fields.  When omitted, new identifiers are generated automatically.
     In addition to the answer text, the response contains the user
-    and conversation identifiers so the client can continue the
+    and session identifiers so the client can continue the
     dialogue in context.
     """
     try:

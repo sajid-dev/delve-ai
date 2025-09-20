@@ -188,7 +188,7 @@ Below is an overview of additional features supported by the architecture.  Item
    ```bash
    curl -X POST http://localhost:8000/chat \
      -H "Content-Type: application/json" \
-     -d '{"message":"Hello"}'
+     -d '{"message":"Hello","session_id":"demo-session-1"}'
    ```
 
    and check the health endpoint:
@@ -249,7 +249,7 @@ GET /health
 
 ### `POST /chat`
 
-Starts or continues a conversation and returns an assistant response.  The request body must include a non-empty `message` field.  Optional `user_id` and `conversation_id` fields allow the client to specify an existing user and conversation.  If omitted, new identifiers are generated and returned in the response.  Input validation is handled by Pydantic; if the `message` field is missing, empty or exceeds 500 characters, FastAPI will return a 422 error.
+Starts or continues a conversation and returns an assistant response.  The request body must include a non-empty `message` field.  Optional `user_id` and `session_id` fields allow the client to specify an existing user and session.  If omitted, new identifiers are generated and returned in the response.  Input validation is handled by Pydantic; if the `message` field is missing, empty or exceeds 500 characters, FastAPI will return a 422 error.
 
 When a `user_id` is present it is forwarded to the underlying language model, enabling per-user analytics, auditing or quota management at the model provider level.
 
@@ -259,7 +259,7 @@ When a `user_id` is present it is forwarded to the underlying language model, en
 {
   "message": "Hello, who are you?",
   "user_id": "123e4567-e89b-12d3-a456-426614174000",        // optional
-  "conversation_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66" // optional
+  "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66" // optional
 }
 ```
 
@@ -268,7 +268,7 @@ When a `user_id` is present it is forwarded to the underlying language model, en
 ```json
 {
   "user_id": "123e4567-e89b-12d3-a456-426614174000",
-  "conversation_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
+  "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
   "answer": "Hello! I'm your AI assistant. How can I help you today?"
 }
 ```

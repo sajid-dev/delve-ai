@@ -8,8 +8,8 @@ class ChatRequest(BaseModel):
 
     This model supports multi‑user, multi‑conversation scenarios.  The
     ``message`` field contains the user's prompt.  Optional ``user_id``
-    and ``conversation_id`` fields allow clients to specify an existing
-    user and conversation; if omitted a new user or conversation will
+    and ``session_id`` fields allow clients to specify an existing
+    user and session; if omitted a new user or session will
     be created automatically.  The message must be a non‑empty string
     and is limited to 500 characters to prevent excessively long
     prompts from overloading the LLM service.  Pydantic will
@@ -27,7 +27,7 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional identifier for the user.  If omitted a new user ID will be generated."
     )
-    conversation_id: str | None = Field(
+    session_id: str | None = Field(
         default=None,
-        description="Optional identifier for the conversation.  If omitted a new conversation will be started."
+        description="Optional identifier for the chat session.  If omitted a new session will be started."
     )

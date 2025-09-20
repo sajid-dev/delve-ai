@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from mcp import ClientSession
 from mcp import types as mcp_types
@@ -82,6 +83,63 @@ class LLMService:
         # parameters will fall back to library defaults.
         self.llm = ChatOpenAI(**init_kwargs)
 
+        # Prompt template shared by all chains. System context and user content
+        # are injected dynamically per request.
+        self._prompt_template = ChatPromptTemplate.from_messages(
+            [
+                ("system", "{system_prompt}"),
+                ("human", "{user_prompt}"),
+            ]
+        )
+
+        # Router and sequential-chain templates allow the LLM to pick an execution
+        # strategy and optionally break complex requests into planning/execution
+        # stages. All templates share the base system prompt to keep tone aligned.
+        self._router_template = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You analyse user requests and choose the best response path. "
+                    "Reply with JSON of the form {{\"route\": \"sequential\"}} or {{\"route\": \"standard\"}}. "
+                    "Pick 'sequential' for multi-step instructions, planning, research, or when the user asks for detailed breakdowns. "
+                    "Use 'standard' for simple, short, or conversational replies.",
+                ),
+                (
+                    "human",
+                    "Base instructions:\n{system_prompt}\n\nConversation context:\n{context}\n\nUser request:\n{question}",
+                ),
+            ]
+        )
+
+        self._sequential_planner_template = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You create concise plans before responding as the assistant. "
+                    "Return a numbered plan (3 bullets max) focusing on how to fulfil the request."
+                ),
+                (
+                    "human",
+                    "Base instructions:\n{system_prompt}\n\nConversation context:\n{context}\n\nUser request:\n{question}\n\n"
+                    "Produce the plan only."
+                ),
+            ]
+        )
+
+        self._sequential_executor_template = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are the assistant following a provided plan. Use the plan, context, and any tool data to craft a thorough yet concise reply."
+                ),
+                (
+                    "human",
+                    "Base instructions:\n{system_prompt}\n\nConversation context:\n{context}\n\nPlan to follow:\n{plan}\n\n"
+                    "Additional tool context (can be <none>):\n{tool_context}\n\nUser request:\n{question}"
+                ),
+            ]
+        )
+
         # Base system prompt used for every interaction.  Additional context is
         # appended dynamically from the conversation memory on each request.
         self._system_prompt = (
@@ -90,7 +148,13 @@ class LLMService:
             "latest user message."
         )
 
-    def generate(self, prompt: str, memory: ChatMemory, user_id: str | None = None) -> str:
+    def generate(
+        self,
+        prompt: str,
+        memory: ChatMemory,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
         """Generate a response using the provided prompt and memory.
 
         This method wraps the LangChain call in a try/except block so that
@@ -107,6 +171,9 @@ class LLMService:
             Identifier of the end user for the request.  When provided the
             identifier is forwarded to the underlying LLM so usage can be
             tracked per user.
+        session_id: str, optional
+            Identifier for the chat session (conversation). Used for logging and
+            downstream tooling.
 
         Returns
         -------
@@ -118,7 +185,12 @@ class LLMService:
         ChatError
             If an unexpected error occurs during generation.
         """
-        logger.debug("Generating response for prompt: {!r}", prompt)
+        logger.debug(
+            "Generating response for prompt: {!r} user={} session={}",
+            prompt,
+            user_id,
+            session_id,
+        )
         try:
             llm = self.llm
             if user_id:
@@ -127,14 +199,44 @@ class LLMService:
                 model_kwargs = {**self._model_kwargs, "user": user_id}
                 llm = ChatOpenAI(**self._llm_kwargs, model_kwargs=model_kwargs)
 
-            system_message = self._build_system_message(prompt, memory)
+            history_snippets = memory.get_relevant_history(prompt)
+            if history_snippets:
+                logger.debug(
+                    "Retrieved {} characters of conversation context for session={}",
+                    len(history_snippets),
+                    session_id,
+                )
+            else:
+                logger.debug("No prior conversation context found for session={}", session_id)
+            system_message = self._build_system_message(history_snippets)
 
             tool_context: str | None = None
             if self.llm_config.mcp_enabled and self._should_use_mcp(prompt):
                 try:
-                    tool_context = self._collect_mcp_context(prompt)
+                    tool_context = self._collect_mcp_context(prompt, session_id=session_id)
+                    if tool_context:
+                        logger.debug(
+                            "Collected MCP tool context for session={} ({} characters)",
+                            session_id,
+                            len(tool_context),
+                        )
                 except Exception:
                     logger.exception("Failed to collect MCP tool context")
+
+            route = self._decide_generation_route(llm, prompt, history_snippets)
+            if route == "sequential":
+                logger.info(
+                    "Router selected sequential generation for session={}",
+                    session_id,
+                )
+                return self._generate_with_sequential_chain(
+                    llm=llm,
+                    prompt=prompt,
+                    history_snippets=history_snippets,
+                    tool_context=tool_context,
+                )
+
+            logger.info("Router selected standard generation for session={}", session_id)
 
             return self._invoke_llm(llm, system_message, prompt, tool_context)
         except Exception as exc:
@@ -178,12 +280,106 @@ class LLMService:
     # ------------------------------------------------------------------
     # Internal helpers
 
-    def _build_system_message(self, prompt: str, memory: ChatMemory) -> str:
+    def _build_system_message(self, history_snippets: str | None) -> str:
         """Construct the system prompt including contextual memory."""
-        history_snippets = memory.get_relevant_history(prompt)
         if history_snippets:
             return f"{self._system_prompt}\n\nContext:\n{history_snippets}"
         return f"{self._system_prompt}\n\nContext: <none>"
+
+    def _decide_generation_route(
+        self,
+        llm: ChatOpenAI,
+        prompt: str,
+        history_snippets: str | None,
+    ) -> str:
+        """Use the router prompt to choose between sequential and standard execution."""
+        try:
+            router_response = self._invoke_template(
+                llm,
+                self._router_template,
+                {
+                    "system_prompt": self._system_prompt,
+                    "context": history_snippets or "<none>",
+                    "question": prompt,
+                },
+            )
+            logger.debug("Router raw response: {}", router_response)
+        except Exception:
+            logger.exception("Routing decision failed; defaulting to standard mode")
+            return "standard"
+
+        try:
+            parsed = json.loads(router_response)
+            route_value = str(parsed.get("route", "standard")).strip().lower()
+        except Exception:
+            logger.debug("Router response not valid JSON: {}", router_response)
+            return "standard"
+
+        if route_value not in {"standard", "sequential"}:
+            logger.debug("Router returned unknown route {!r}; defaulting to standard", route_value)
+            return "standard"
+        logger.debug("Router resolved route={}", route_value)
+        return route_value
+
+    def _generate_with_sequential_chain(
+        self,
+        llm: ChatOpenAI,
+        prompt: str,
+        history_snippets: str | None,
+        tool_context: str | None = None,
+    ) -> str:
+        """Run the two-stage plan → execute flow for complex prompts."""
+        context_text = history_snippets or "<none>"
+
+        try:
+            plan = self._invoke_template(
+                llm,
+                self._sequential_planner_template,
+                {
+                    "system_prompt": self._system_prompt,
+                    "context": context_text,
+                    "question": prompt,
+                },
+            )
+            logger.debug(
+                "Sequential planner output for prompt {!r}: {}",
+                prompt[:80],
+                plan,
+            )
+        except Exception:
+            logger.exception("Sequential planner failed; falling back to standard execution")
+            system_message = self._build_system_message(history_snippets)
+            return self._invoke_llm(llm, system_message, prompt, tool_context)
+
+        execution_response = self._invoke_template(
+            llm,
+            self._sequential_executor_template,
+            {
+                "system_prompt": self._system_prompt,
+                "context": context_text,
+                "plan": plan or "Plan could not be generated. Provide the best possible answer regardless.",
+                "tool_context": tool_context or "<none>",
+                "question": prompt,
+            },
+        )
+        logger.debug(
+            "Sequential executor produced response length={} for prompt snippet={}",
+            len(execution_response),
+            prompt[:80],
+        )
+        return execution_response
+
+    def _invoke_template(
+        self,
+        llm: ChatOpenAI,
+        template: ChatPromptTemplate,
+        variables: dict[str, Any],
+    ) -> str:
+        """Execute a prompt template with the provided LLM and return string content."""
+        chain = template | llm
+        result = chain.invoke(variables)
+        content = getattr(result, "content", str(result))
+        return content.strip()
 
     def _invoke_llm(self, llm: ChatOpenAI, system_message: str, prompt: str, tool_context: str | None = None) -> str:
         """Invoke the base LLM with the provided system and user messages."""
@@ -193,29 +389,31 @@ class LLMService:
                 f"{prompt}\n\n"
                 f"Additional data gathered from MCP tools:\n{tool_context}"
             )
-        messages = [
-            SystemMessage(content=system_message),
-            HumanMessage(content=human_content),
-        ]
-        response = llm.invoke(messages)
+        chain = self._prompt_template | llm
+        response = chain.invoke(
+            {
+                "system_prompt": system_message,
+                "user_prompt": human_content,
+            }
+        )
         content = getattr(response, "content", str(response))
         return content.strip()
 
-    def _collect_mcp_context(self, prompt: str) -> str | None:
+    def _collect_mcp_context(self, prompt: str, session_id: str | None = None) -> str | None:
         """Synchronously collect additional tool context via the configured MCP transport."""
         if self.llm_config.mcp_transport != "stdio":
             raise ValueError("Only the 'stdio' MCP transport is currently supported")
 
         try:
-            return asyncio.run(self._acollect_mcp_context(prompt))
+            return asyncio.run(self._acollect_mcp_context(prompt, session_id=session_id))
         except RuntimeError:
             loop = asyncio.new_event_loop()
             try:
-                return loop.run_until_complete(self._acollect_mcp_context(prompt))
+                return loop.run_until_complete(self._acollect_mcp_context(prompt, session_id=session_id))
             finally:
                 loop.close()
 
-    async def _acollect_mcp_context(self, prompt: str) -> str | None:
+    async def _acollect_mcp_context(self, prompt: str, session_id: str | None = None) -> str | None:
         """Async helper that launches the MCP server, selects tools and refines their outputs."""
         server_params = StdioServerParameters(
             command=self.llm_config.mcp_server_command or "",
@@ -227,6 +425,12 @@ class LLMService:
         async with stdio_client(server_params) as (read_stream, write_stream):
             session = ClientSession(read_stream, write_stream)
             await session.initialize()
+
+            logger.debug(
+                "Collecting MCP context for session={} using prompt snippet={}",
+                session_id,
+                prompt[:80],
+            )
 
             tools_result = await session.list_tools()
             available_tools = list(tools_result.tools)
