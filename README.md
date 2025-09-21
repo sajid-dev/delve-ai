@@ -250,21 +250,36 @@ delve-ai/
 * This backend uses `VectorStoreRetrieverMemory` from LangChain to store conversation history in a persistent `ChromaDB` database.  The database persists under the `chroma_db/` directory so that previous messages are used to provide context to subsequent prompts.
 * Make sure the `LLM_API_KEY` environment variable is set; without it, the service will return an error.  If you are using a provider other than OpenAI, also set `LLM_BASE_URL` and the appropriate `LLM_MODEL`.
 
-## API endpoints
+## API services
 
-The backend exposes a small number of HTTP endpoints via FastAPI.  All responses are JSON encoded.
+The FastAPI application exposes a small, well-defined surface area.  Every endpoint returns JSON unless stated otherwise.
 
-### `GET /health`
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/health` | Lightweight health probe used by load balancers and uptime checks. |
+| POST | `/chat` | Submit a user message and receive the assistant response. |
+| GET | `/sessions` | List every saved session for a specific user. |
+| GET | `/sessions/{session_id}` | Retrieve the full transcript of a single session. |
+| DELETE | `/sessions/{session_id}` | Remove one session for the current user. |
+| DELETE | `/sessions` | Remove all sessions for the current user. |
+| GET | `/admin/dashboard` | Aggregate analytics across all users and sessions. |
+| GET | `/admin/conversations/{user_id}` | Inspect every session stored for the given user. |
+| DELETE | `/admin/conversations` | Purge all conversations across every user. |
+| DELETE | `/admin/conversations/{user_id}` | Purge every conversation that belongs to one user. |
 
-Returns a simple health check indicating the service is running.
+### Health
 
-**Request:**
+#### `GET /health`
+
+Returns the operational status of the service.
+
+**Request**
 
 ```
 GET /health
 ```
 
-**Response:**
+**Response 200**
 
 ```json
 {
@@ -272,17 +287,64 @@ GET /health
 }
 ```
 
-### `GET /admin/conversations/{user_id}`
+### Chat
 
-Returns all stored sessions for the specified user, including per-message metadata. Useful for audits and customer-support escalations.
+#### `POST /chat`
 
-**Request:**
+Creates or continues a conversation.  Supply `user_id` and `session_id` to resume an existing thread; omit them to let the service create new IDs.
+
+**Request**
+
+```json
+{
+  "message": "Hello, who are you?",
+  "user_id": "123e4567-e89b-12d3-a456-426614174000",
+  "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66"
+}
+```
+
+**Response 200**
+
+```json
+{
+  "user_id": "123e4567-e89b-12d3-a456-426614174000",
+  "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
+  "data": {
+    "components": [
+      {
+        "type": "text",
+        "payload": {
+          "content": "Hello! I'm your AI assistant. How can I help you today?"
+        }
+      }
+    ]
+  }
+}
+```
+
+`data.components` describes how front-ends should render the answer.  Additional component types (`list`, `table`, `chart`, `code`, `image`, `json`, `markdown`) are emitted when the LLM response includes structured content.
+
+**Response 500 (example)**
+
+```json
+{
+  "detail": "LLM processing failed"
+}
+```
+
+### Session management
+
+#### `GET /sessions`
+
+Lists every session for a user.  The `user_id` query parameter is required.
+
+**Request**
 
 ```
-GET /admin/conversations/123e4567-e89b-12d3-a456-426614174000
+GET /sessions?user_id=123e4567-e89b-12d3-a456-426614174000
 ```
 
-**Response (200):**
+**Response 200**
 
 ```json
 [
@@ -293,92 +355,22 @@ GET /admin/conversations/123e4567-e89b-12d3-a456-426614174000
     "created_at": "2025-09-17T10:00:00Z",
     "updated_at": "2025-09-17T10:01:00Z",
     "message_count": 2,
-    "messages": [
-      { "role": "user", "content": "Hello, who are you?", "timestamp": "2025-09-17T10:00:00Z" },
-      { "role": "assistant", "content": "Hello! I'm your AI assistant. How can I help you today?", "timestamp": "2025-09-17T10:01:00Z" }
-    ]
+    "messages": []
   }
 ]
 ```
 
-### `POST /chat`
+#### `GET /sessions/{session_id}`
 
-Starts or continues a conversation and returns an assistant response.  The request body must include a non-empty `message` field.  Optional `user_id` and `session_id` fields allow the client to specify an existing user and session.  If omitted, new identifiers are generated and returned in the response.  Input validation is handled by Pydantic; if the `message` field is missing, empty or exceeds 500 characters, FastAPI will return a 422 error.
+Retrieves an entire conversation for the requesting user.  Requires both the `session_id` path parameter and the `user_id` query parameter.
 
-When a `user_id` is present it is forwarded to the underlying language model, enabling per-user analytics, auditing or quota management at the model provider level.
-
-**Request:**
-
-```json
-{
-  "message": "Hello, who are you?",
-  "user_id": "123e4567-e89b-12d3-a456-426614174000",        // optional
-  "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66" // optional
-}
-```
-
-**Response (200):**
-
-```json
-{
-  "user_id": "123e4567-e89b-12d3-a456-426614174000",
-  "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
-  "data": {
-    "data_type": "text",
-    "content": {
-      "text": "Hello! I'm your AI assistant. How can I help you today?"
-    }
-  }
-}
-```
-
-`data.data_type` indicates how to interpret the payload. For example, `text` responses include `content.text`; `list` responses return `content.ordered` and a collection of items where each item provides a `title`, `description`, optional `bullets`, extracted `code_blocks`, and the original `raw` markdown so the frontend can render a consistent template without re-parsing the text.
-
-If the LLM or memory backend fails, the service returns a 500 Internal Server Error with a JSON body such as:
-
-```json
-{
-  "detail": "LLM generation failed"
-}
-```
-
-### `GET /sessions`
-
-Lists all sessions for a given user.  The `user_id` query parameter is required.
-
-**Request:**
-
-```
-GET /sessions?user_id=123e4567-e89b-12d3-a456-426614174000
-```
-
-**Response (200):**
-
-```json
-[
-  {
-    "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
-    "user_id": "123e4567-e89b-12d3-a456-426614174000",
-    "title": "Hello, who are you?",           // optional title derived from first message
-    "created_at": "2025-09-17T10:00:00Z",
-    "updated_at": "2025-09-17T10:01:00Z",
-    "message_count": 2,
-    "messages": [ /* omitted for brevity */ ]
-  }
-]
-```
-
-### `GET /sessions/{session_id}`
-
-Retrieves a single session for a user.  Both `session_id` (path) and `user_id` (query) parameters are required.
-
-**Request:**
+**Request**
 
 ```
 GET /sessions/9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66?user_id=123e4567-e89b-12d3-a456-426614174000
 ```
 
-**Response (200):**
+**Response 200**
 
 ```json
 {
@@ -389,27 +381,82 @@ GET /sessions/9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66?user_id=123e4567-e89b-12d3-a4
   "updated_at": "2025-09-17T10:01:00Z",
   "message_count": 2,
   "messages": [
-    { "role": "user", "content": "Hello, who are you?", "timestamp": "2025-09-17T10:00:00Z" },
-    { "role": "assistant", "content": "Hello! I'm your AI assistant. How can I help you today?", "timestamp": "2025-09-17T10:01:00Z" }
+    {
+      "role": "user",
+      "content": "Hello, who are you?",
+      "content_type": "text",
+      "timestamp": "2025-09-17T10:00:00Z",
+      "components": null
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I'm your AI assistant. How can I help you today?",
+      "content_type": "text",
+      "timestamp": "2025-09-17T10:01:00Z",
+      "components": [
+        {
+          "type": "text",
+          "payload": {
+            "content": "Hello! I'm your AI assistant. How can I help you today?"
+          }
+        }
+      ]
+    }
   ]
 }
 ```
 
-If the session does not exist, the service returns a 404 Not Found.
+**Response 404 (example)**
 
-### `DELETE /sessions/{session_id}`
+```json
+{
+  "detail": "Session not found"
+}
+```
 
-Deletes a specific session for a user.  Requires both the `session_id` path parameter and the `user_id` query parameter.  Returns a 204 No Content response on success.
+#### `DELETE /sessions/{session_id}`
 
-### `DELETE /sessions`
+Deletes a single conversation for the requesting user.  Requires both `session_id` and `user_id`.
 
-Deletes all sessions for a user.  Requires the `user_id` query parameter.  Returns a 204 No Content response on success.
+**Request**
 
-### `GET /admin/dashboard`
+```
+DELETE /sessions/9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66?user_id=123e4567-e89b-12d3-a456-426614174000
+```
 
-Provides aggregated analytics across every user.  Useful for an admin dashboard or operational reporting.  Statistics are session-oriented so you can monitor how many active sessions each user maintains.
+**Response 204**
 
-**Response (200):**
+No body.
+
+#### `DELETE /sessions`
+
+Deletes every conversation that belongs to the requesting user.
+
+**Request**
+
+```
+DELETE /sessions?user_id=123e4567-e89b-12d3-a456-426614174000
+```
+
+**Response 204**
+
+No body.
+
+### Admin operations
+
+Admin endpoints operate across all users and should be protected behind authentication in production deployments.
+
+#### `GET /admin/dashboard`
+
+Returns aggregate usage metrics across every stored session.
+
+**Request**
+
+```
+GET /admin/dashboard
+```
+
+**Response 200**
 
 ```json
 {
@@ -432,16 +479,8 @@ Provides aggregated analytics across every user.  Useful for an admin dashboard 
           "created_at": "2025-09-17T10:00:00Z",
           "updated_at": "2025-09-19T08:30:00Z",
           "tokens_used": 640,
-        "latest_answer": {
-            "content": "Follow-up guidance...",
-            "content_type": "list",
-            "structured_data": {
-              "data_type": "list",
-              "content": {
-                "ordered": true,
-                "items": [ /* abbreviated for brevity */ ]
-              }
-            },
+          "latest_answer": {
+            "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
             "timestamp": "2025-09-19T08:30:00Z"
           }
         }
@@ -451,19 +490,65 @@ Provides aggregated analytics across every user.  Useful for an admin dashboard 
 }
 ```
 
-`active_users` counts the number of users who have interacted with the system in the last 24 hours (`is_active` flag in each user entry).  `last_active` captures the most recent session update for the user.
+#### `GET /admin/conversations/{user_id}`
 
-### `DELETE /admin/conversations`
+Returns every saved session for the specified user, including full transcripts.
 
-Deletes **all** stored sessions across every user.  This is intended for administrative resets or compliance workflows that require clearing history.
+**Request**
 
-**Request:**
+```
+GET /admin/conversations/123e4567-e89b-12d3-a456-426614174000
+```
+
+**Response 200**
+
+```json
+[
+  {
+    "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
+    "user_id": "123e4567-e89b-12d3-a456-426614174000",
+    "title": "Hello, who are you?",
+    "created_at": "2025-09-17T10:00:00Z",
+    "updated_at": "2025-09-17T10:01:00Z",
+    "message_count": 2,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello, who are you?",
+        "content_type": "text",
+        "timestamp": "2025-09-17T10:00:00Z",
+        "components": null
+      },
+      {
+        "role": "assistant",
+        "content": "Hello! I'm your AI assistant. How can I help you today?",
+        "content_type": "text",
+        "timestamp": "2025-09-17T10:01:00Z",
+        "components": [
+          {
+            "type": "text",
+            "payload": {
+              "content": "Hello! I'm your AI assistant. How can I help you today?"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
+```
+
+#### `DELETE /admin/conversations`
+
+Clears every stored session across all users.  Use with caution.
+
+**Request**
 
 ```
 DELETE /admin/conversations
 ```
 
-**Response (200):**
+**Response 200**
 
 ```json
 {
@@ -471,17 +556,17 @@ DELETE /admin/conversations
 }
 ```
 
-### `DELETE /admin/conversations/{user_id}`
+#### `DELETE /admin/conversations/{user_id}`
 
-Removes every session belonging to the specified user without affecting other users.
+Clears every session belonging to the given user without affecting others.
 
-**Request:**
+**Request**
 
 ```
 DELETE /admin/conversations/123e4567-e89b-12d3-a456-426614174000
 ```
 
-**Response (200):**
+**Response 200**
 
 ```json
 {

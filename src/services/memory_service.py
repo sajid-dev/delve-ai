@@ -46,8 +46,8 @@ class MemoryService:
         *,
         question_type: MessageContentType = MessageContentType.TEXT,
         answer_type: MessageContentType = MessageContentType.TEXT,
-        question_structured: object | None = None,
-        answer_structured: object | None = None,
+        question_components: list[dict[str, object]] | None = None,
+        answer_components: list[dict[str, object]] | None = None,
     ) -> None:
         """Persist a question/answer pair into a user's session memory.
 
@@ -75,14 +75,14 @@ class MemoryService:
                 content=question,
                 content_type=question_type,
                 timestamp=datetime.utcnow().isoformat(),
-                structured_data=question_structured,
+                components=question_components,
             )
             assistant_msg = ChatMessage(
                 role=MessageRole.ASSISTANT,
                 content=answer,
                 content_type=answer_type,
                 timestamp=datetime.utcnow().isoformat(),
-                structured_data=answer_structured,
+                components=answer_components,
             )
             # Create session record if needed
             self._manager.create_session(user_id, session_id)
@@ -105,6 +105,10 @@ class MemoryService:
     def get_session(self, user_id: str, session_id: str) -> Conversation | None:
         """Return a single session metadata record."""
         return self._manager.get_session(user_id, session_id)
+
+    def persist_session(self, user_id: str, session_id: str) -> None:
+        """Ensure session metadata is written to disk."""
+        self._manager.persist_session(user_id, session_id)
 
     def delete_session(self, user_id: str, session_id: str) -> None:
         """Delete a session and its memory."""

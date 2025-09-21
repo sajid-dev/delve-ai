@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from .enums import MessageContentType, MessageRole
 
@@ -17,7 +17,7 @@ class ChatMessage(BaseModel):
     timestamp; if omitted, one will be generated automatically by
     services when the message is persisted.  Structured payloads (such as
     parsed tables or charts) can optionally be attached via
-    ``structured_data`` so that frontends can render richer widgets
+    ``components`` so that frontends can render richer widgets
     without re-parsing the raw text.
     """
 
@@ -25,4 +25,29 @@ class ChatMessage(BaseModel):
     content: str
     content_type: MessageContentType = MessageContentType.TEXT
     timestamp: str | None = None
-    structured_data: Any | None = None
+    components: list[dict[str, Any]] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_structured_data(cls, data: Any) -> Any:
+        """Backwards compatibility for legacy ``structured_data`` payloads."""
+        if not isinstance(data, dict):
+            return data
+
+        if "components" in data:
+            return data
+
+        structured = data.pop("structured_data", None)
+        if structured is None:
+            return data
+
+        if isinstance(structured, dict) and "components" in structured:
+            data["components"] = structured.get("components")
+        else:
+            data["components"] = [
+                {
+                    "type": "custom",
+                    "payload": {"data": structured},
+                }
+            ]
+        return data
