@@ -164,14 +164,14 @@ class ChatService:
 
     def _build_response_payload(self, analysis: ContentAnalysis) -> dict[str, Any]:
         """Normalise analysis output into a frontend-friendly structure."""
-        payload: dict[str, Any] = {"raw_text": analysis.text}
+        content: dict[str, Any]
         if analysis.structured_data is not None:
-            payload["structured"] = analysis.structured_data
+            content = analysis.structured_data
         else:
-            payload["structured"] = {"text": analysis.text}
+            content = {"text": analysis.text}
         return {
-            "type": analysis.content_type.value,
-            "payload": payload,
+            "data_type": analysis.content_type.value,
+            "content": content,
         }
 
     @staticmethod

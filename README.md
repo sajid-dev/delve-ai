@@ -181,8 +181,11 @@ Below is an overview of additional features supported by the architecture.  Item
    ]'
    ```
 
-   The legacy `LLM_MCP_ENABLED`, `LLM_MCP_TRANSPORT`, `LLM_MCP_TRIGGER_KEYWORDS`
-   and `LLM_MCP_SERVERS` variables are still honoured for backward compatibility,
+   If you omit `MCP_SERVERS` entirely the backend will fall back to the default
+   definitions in `src/config/mcp_servers.py`, which makes local development
+   easier—edit that file to tweak built-in servers.  The legacy
+   `LLM_MCP_ENABLED`, `LLM_MCP_TRANSPORT`, `LLM_MCP_TRIGGER_KEYWORDS` and
+   `LLM_MCP_SERVERS` variables are still honoured for backward compatibility,
    but new deployments should prefer the streamlined `MCP_*` names.
 
    Under the hood the backend now relies on LangChain's `langchain-mcp` toolkit
@@ -321,18 +324,15 @@ When a `user_id` is present it is forwarded to the underlying language model, en
   "user_id": "123e4567-e89b-12d3-a456-426614174000",
   "session_id": "9c5f869a-2b8a-47f6-9ffd-0cbbd9e02c66",
   "data": {
-    "type": "text",
-    "payload": {
-      "raw_text": "Hello! I'm your AI assistant. How can I help you today?",
-      "structured": {
-        "text": "Hello! I'm your AI assistant. How can I help you today?"
-      }
+    "data_type": "text",
+    "content": {
+      "text": "Hello! I'm your AI assistant. How can I help you today?"
     }
   }
 }
 ```
 
-`data.type` indicates how to interpret the payload. For example, `text` responses include `payload.raw_text`; `list` responses return `payload.ordered` and a collection of items where each item provides a `title`, `description`, optional `bullets`, extracted `code_blocks`, and the original `raw` markdown so the frontend can render a consistent template without re-parsing the text.
+`data.data_type` indicates how to interpret the payload. For example, `text` responses include `content.text`; `list` responses return `content.ordered` and a collection of items where each item provides a `title`, `description`, optional `bullets`, extracted `code_blocks`, and the original `raw` markdown so the frontend can render a consistent template without re-parsing the text.
 
 If the LLM or memory backend fails, the service returns a 500 Internal Server Error with a JSON body such as:
 
@@ -432,12 +432,12 @@ Provides aggregated analytics across every user.  Useful for an admin dashboard 
           "created_at": "2025-09-17T10:00:00Z",
           "updated_at": "2025-09-19T08:30:00Z",
           "tokens_used": 640,
-          "latest_answer": {
+        "latest_answer": {
             "content": "Follow-up guidance...",
             "content_type": "list",
             "structured_data": {
-              "type": "list",
-              "payload": {
+              "data_type": "list",
+              "content": {
                 "ordered": true,
                 "items": [ /* abbreviated for brevity */ ]
               }

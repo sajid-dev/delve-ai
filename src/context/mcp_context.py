@@ -80,15 +80,12 @@ class MCPContextCollector:
 
         if not relevant_servers:
             logger.debug(
-                "No MCP servers matched the current prompt for session={}",
-                session_id,
+                f"No MCP servers matched the current prompt for session={session_id}"
             )
             return None
 
         logger.debug(
-            "Selected MCP servers %s for session=%s",
-            [server.label for server in relevant_servers],
-            session_id,
+            f"Selected MCP servers {[server.label for server in relevant_servers]} for session={session_id}"
         )
 
         client = self._build_multi_server_client(relevant_servers)
@@ -117,23 +114,18 @@ class MCPContextCollector:
             if offline_servers:
                 notice = self._format_offline_notice(offline_servers)
                 logger.warning(
-                    "MCP servers unavailable for session=%s: %s",
-                    session_id,
-                    offline_servers,
+                    f"MCP servers unavailable for session={session_id}: {offline_servers}"
                 )
                 return notice
 
             logger.debug(
-                "No contextual data returned from MCP servers for session=%s",
-                session_id,
+                f"No contextual data returned from MCP servers for session={session_id}"
             )
             return None
 
         merged = "\n\n".join(aggregated_sections)
         logger.debug(
-            "Aggregated MCP context for session=%s (length=%s)",
-            session_id,
-            len(merged),
+            f"Aggregated MCP context for session={session_id} (length={len(merged)})"
         )
         return merged
 
@@ -155,17 +147,16 @@ class MCPContextCollector:
 
             raw_tools: list[mcp_types.Tool] = list(toolkit._tools.tools) if toolkit._tools else []
             logger.debug(
-                "Initialized LangChain MCP toolkit for server=%s exposing %d tool(s)",
-                server.label,
-                len(raw_tools),
+                f"Initialized LangChain MCP toolkit for server={server.label} exposing {len(raw_tools)} tool(s)"
             )
 
             logger.debug(
-                "Collecting MCP context from server=%s using command=%s for session=%s prompt_snippet=%s",
-                server.label,
-                command_repr,
-                session_id,
-                prompt[:80],
+                "Collecting MCP context from server={server} using command={command} for session={session} prompt_snippet={snippet}".format(
+                    server=server.label,
+                    command=command_repr,
+                    session=session_id,
+                    snippet=prompt[:80],
+                )
             )
 
             available_tools = raw_tools
@@ -218,10 +209,7 @@ class MCPContextCollector:
 
             section = self._format_tool_context(refined_results)
             logger.debug(
-                "Server %s produced %d tool result(s) (length=%s)",
-                server.label,
-                len(refined_results),
-                len(section),
+                f"Server {server.label} produced {len(refined_results)} tool result(s) (length={len(section)})"
             )
             return section
 
@@ -277,10 +265,20 @@ class MCPContextCollector:
         arguments: dict[str, Any] = {}
         for name, meta in properties.items():
             field_type = meta.get("type")
+            enum_values = meta.get("enum") or []
+            if enum_values:
+                arguments[name] = enum_values[0]
+                continue
+
             if field_type == "string":
                 arguments[name] = prompt
-            elif field_type == "array" and meta.get("items", {}).get("type") == "string":
-                arguments[name] = [prompt]
+            elif field_type == "array":
+                items = meta.get("items", {})
+                item_enum = items.get("enum") or []
+                if item_enum:
+                    arguments[name] = [item_enum[0]]
+                elif items.get("type") == "string":
+                    arguments[name] = [prompt]
 
         required = schema.get("required", [])
         missing = [name for name in required if name not in arguments]

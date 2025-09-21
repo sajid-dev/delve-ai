@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .mcp_servers import DEFAULT_MCP_SERVERS
+
 load_dotenv()
 
 
@@ -71,6 +73,28 @@ class McpConfig(BaseSettings):
         validation_alias=AliasChoices("MCP_SERVERS", "LLM_MCP_SERVERS"),
     )
 
+    # Backwards compatibility for single-server env variables
+    server_command: Optional[str] = Field(
+        None,
+        alias="MCP_SERVER_COMMAND",
+        validation_alias=AliasChoices("MCP_SERVER_COMMAND", "LLM_MCP_SERVER_COMMAND"),
+    )
+    server_args: list[str] = Field(
+        default_factory=list,
+        alias="MCP_SERVER_ARGS",
+        validation_alias=AliasChoices("MCP_SERVER_ARGS", "LLM_MCP_SERVER_ARGS"),
+    )
+    server_env: Optional[dict[str, str]] = Field(
+        None,
+        alias="MCP_SERVER_ENV",
+        validation_alias=AliasChoices("MCP_SERVER_ENV", "LLM_MCP_SERVER_ENV"),
+    )
+    server_cwd: Optional[str] = Field(
+        None,
+        alias="MCP_SERVER_CWD",
+        validation_alias=AliasChoices("MCP_SERVER_CWD", "LLM_MCP_SERVER_CWD"),
+    )
+
     @field_validator("trigger_keywords", mode="before")
     @classmethod
     def parse_trigger_keywords(cls, value: list[str] | str) -> list[str]:
@@ -79,6 +103,15 @@ class McpConfig(BaseSettings):
         if not value:
             return []
         return [part.strip() for part in value.replace(",", " ").split() if part.strip()]
+
+    @field_validator("server_args", mode="before")
+    @classmethod
+    def parse_server_args(cls, value: list[str] | str) -> list[str]:
+        if isinstance(value, list):
+            return value
+        if not value:
+            return []
+        return shlex.split(value)
 
     @field_validator("servers", mode="before")
     @classmethod
@@ -99,6 +132,20 @@ class McpConfig(BaseSettings):
     def validate_mcp_config(self) -> "McpConfig":
         servers: list[McpServerConfig] = list(self.servers)
 
+        if not servers and DEFAULT_MCP_SERVERS:
+            servers = [McpServerConfig(**definition) for definition in DEFAULT_MCP_SERVERS]
+
+        if self.server_command:
+            primary = McpServerConfig(
+                name="default",
+                command=self.server_command,
+                args=self.server_args,
+                env=self.server_env,
+                cwd=self.server_cwd,
+                trigger_keywords=self.trigger_keywords,
+            )
+            servers.insert(0, primary)
+
         if self.enabled:
             if self.transport != "stdio":
                 raise ValueError("Only 'stdio' MCP transport is currently supported")
@@ -107,6 +154,10 @@ class McpConfig(BaseSettings):
 
         if servers:
             primary = servers[0]
+            object.__setattr__(self, "server_command", primary.command)
+            object.__setattr__(self, "server_args", primary.args)
+            object.__setattr__(self, "server_env", primary.env)
+            object.__setattr__(self, "server_cwd", primary.cwd)
             if not self.trigger_keywords:
                 object.__setattr__(self, "trigger_keywords", primary.trigger_keywords)
 
@@ -119,6 +170,12 @@ class McpConfig(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    @property
+    def primary_server(self) -> Optional[McpServerConfig]:
+        """Return the first configured server, if any."""
+
+        return self.servers[0] if self.servers else None
 
 
 
