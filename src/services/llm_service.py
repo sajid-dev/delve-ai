@@ -128,65 +128,56 @@ class LLMService:
             session_id,
         )
         try:
-            llm = self.llm
-            if user_id:
-                # Recreate the LLM with the user identifier, forwarding via model_kwargs
-                # to avoid warnings from the underlying client.
-                model_kwargs = {**self._model_kwargs, "user": user_id}
-                llm = ChatOpenAI(**self._llm_kwargs, model_kwargs=model_kwargs)
-
+            llm = self._resolve_llm(user_id)
             history_snippets = memory.get_relevant_history(prompt)
-            if history_snippets:
-                logger.debug(
-                    "Retrieved {} characters of conversation context for session={}",
-                    len(history_snippets),
-                    session_id,
-                )
-            else:
-                logger.debug("No prior conversation context found for session={}", session_id)
-            system_message = self.chain_manager.build_system_message(history_snippets)
-
-            tool_context: str | None = None
-            if (
-                self.llm_config.mcp_enabled
-                and self._mcp_collector is not None
-                and self._mcp_collector.should_use_mcp(prompt)
-            ):
-                try:
-                    tool_context = self._mcp_collector.collect_context(
-                        prompt,
-                        session_id=session_id,
-                    )
-                    if tool_context:
-                        logger.debug(
-                            "Collected MCP tool context for session={} ({} characters)",
-                            session_id,
-                            len(tool_context),
-                        )
-                except Exception:
-                    logger.exception("Failed to collect MCP tool context")
-
-            route = self.chain_manager.decide_generation_route(llm, prompt, history_snippets)
-            if route == "sequential":
-                logger.info(
-                    "Router selected sequential generation for session={}",
-                    session_id,
-                )
-                return self.chain_manager.generate_with_sequential_chain(
-                    llm=llm,
-                    prompt=prompt,
-                    history_snippets=history_snippets,
-                    tool_context=tool_context,
-                )
-
-            logger.info("Router selected standard generation for session={}", session_id)
-
-            return self.chain_manager.invoke_standard(llm, system_message, prompt, tool_context)
+            tool_context = self._collect_tool_context(prompt, session_id)
+            return self.chain_manager.summarize(
+                llm=llm,
+                prompt=prompt,
+                history_snippets=history_snippets,
+                tool_context=tool_context,
+            )
         except Exception as exc:
             logger.exception("LLM generation failed")
             from ..utils.error_handler import ChatError
 
             raise ChatError("LLM generation failed") from exc
+
+    def _resolve_llm(self, user_id: str | None) -> ChatOpenAI:
+        """Return an LLM instance optionally tagged with the user identifier."""
+
+        if not user_id:
+            return self.llm
+
+        model_kwargs = {**self._model_kwargs, "user": user_id}
+        return ChatOpenAI(**self._llm_kwargs, model_kwargs=model_kwargs)
+
+    def _collect_tool_context(
+        self, prompt: str, session_id: str | None
+    ) -> str | None:
+        """Gather MCP context when the collector is configured."""
+
+        if self._mcp_collector is None or not self.llm_config.mcp_enabled:
+            return None
+
+        try:
+            context = self._mcp_collector.collect_context(
+                prompt,
+                session_id=session_id,
+            )
+        except Exception:
+            logger.exception("Failed to collect MCP tool context")
+            return None
+
+        if context:
+            logger.debug(
+                "Collected MCP tool context for session={} ({} characters)",
+                session_id,
+                len(context),
+            )
+        else:
+            logger.debug("No MCP context gathered for session={}", session_id)
+        return context
 
     # ------------------------------------------------------------------
     # Token accounting helpers

@@ -4,7 +4,8 @@ import asyncio
 import json
 import threading
 from collections import defaultdict
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterable
 
 from loguru import logger
 from mcp import types as mcp_types
@@ -14,23 +15,127 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from ..config.mcp_config import McpConfig, McpServerConfig
 
 
+@dataclass(slots=True)
+class ToolCallPlan:
+    """Plan describing which tool to call and which arguments to supply."""
+
+    tool: mcp_types.Tool
+    arguments: dict[str, Any]
+
+
+class RouterChain:
+    """Decide which MCP servers are relevant for a given prompt."""
+
+    def __init__(self, servers: Iterable[McpServerConfig], fallback_keywords: list[str]) -> None:
+        self._servers = list(servers)
+        self._fallback_keywords = [kw.lower() for kw in fallback_keywords if kw]
+
+    def select(self, prompt: str) -> list[McpServerConfig]:
+        """Return the servers whose keywords appear in the prompt."""
+
+        lowered = prompt.lower()
+        selected: list[McpServerConfig] = []
+        for server in self._servers:
+            keywords = [kw.lower() for kw in server.trigger_keywords if kw]
+            if not keywords:
+                keywords = list(self._fallback_keywords)
+            if not keywords or any(keyword in lowered for keyword in keywords):
+                selected.append(server)
+        return selected
+
+
+class ServerSchemaMap:
+    """Provide simple argument schemas for each configured server."""
+
+    def __init__(self, servers: Iterable[McpServerConfig]) -> None:
+        self._schema: dict[str, dict[str, Any]] = {}
+        for server in servers:
+            self._schema[self._identifier(server)] = {
+                "query": {
+                    "type": "string",
+                    "description": "Original user request passed to the MCP tool.",
+                }
+            }
+
+    def schema_for(self, server: McpServerConfig) -> dict[str, Any]:
+        """Return the schema describing expected arguments for the server."""
+
+        return self._schema.get(self._identifier(server), {"query": {"type": "string"}})
+
+    @staticmethod
+    def _identifier(server: McpServerConfig) -> str:
+        return server.name or server.command
+
+
+class ArgumentExtractor:
+    """Convert natural language prompts into JSON arguments for MCP tools."""
+
+    def __init__(self, schema_map: ServerSchemaMap) -> None:
+        self._schema_map = schema_map
+
+    def build_plans(
+        self,
+        server: McpServerConfig,
+        prompt: str,
+        tools: list[mcp_types.Tool],
+    ) -> list[ToolCallPlan]:
+        if not tools:
+            return []
+
+        schema = self._schema_map.schema_for(server)
+        arguments = self._populate_arguments(schema, prompt)
+        if arguments is None:
+            return []
+
+        # Use the first available tool by default. Servers can expose a single
+        # entry point that understands the "query" argument containing the user request.
+        primary_tool = tools[0]
+        return [ToolCallPlan(tool=primary_tool, arguments=arguments)]
+
+    def _populate_arguments(
+        self, schema: dict[str, Any], prompt: str
+    ) -> dict[str, Any] | None:
+        if not schema:
+            return {}
+
+        arguments: dict[str, Any] = {}
+        for name, meta in schema.items():
+            field_type = meta.get("type")
+            if field_type == "string":
+                arguments[name] = prompt
+            elif "default" in meta:
+                arguments[name] = meta["default"]
+        return arguments
+
+
+class QueryCapableMultiServerMCPClient(MultiServerMCPClient):
+    """Extend the default client with helper methods for orchestration."""
+
+    async def list_tools(self, server_id: str) -> list[mcp_types.Tool]:
+        async with self.session(server_id) as session:
+            toolkit = MCPToolkit(session=session)
+            await toolkit.initialize()
+            return list(toolkit._tools.tools) if toolkit._tools else []
+
+    async def query(
+        self,
+        server_id: str,
+        *,
+        tool: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> mcp_types.CallToolResult:
+        async with self.session(server_id) as session:
+            return await session.call_tool(tool, arguments=arguments or {})
+
+
 class MCPContextCollector:
     """Collect and post-process context from MCP tools for LLM prompts."""
 
     def __init__(self, mcp_config: McpConfig) -> None:
         self._config = mcp_config
-
-    def should_use_mcp(self, prompt: str) -> bool:
-        """Return True when the prompt should trigger MCP tool usage."""
-        if not self._config.enabled or not self._config.servers:
-            return False
-
-        lowered_prompt = prompt.lower()
-        for server in self._config.servers:
-            keywords = self._keywords_for_server(server)
-            if not keywords or any(keyword in lowered_prompt for keyword in keywords):
-                return True
-        return False
+        self._router = RouterChain(mcp_config.servers, mcp_config.trigger_keywords)
+        self._schema_map = ServerSchemaMap(mcp_config.servers)
+        self._argument_extractor = ArgumentExtractor(self._schema_map)
 
     def collect_context(self, prompt: str, session_id: str | None = None) -> str | None:
         """Synchronously collect additional tool context via the configured MCP transport."""
@@ -72,230 +177,110 @@ class MCPContextCollector:
         if not self._config.enabled:
             return None
 
-        relevant_servers = [
-            server
-            for server in self._config.servers
-            if self._should_query_server(server, prompt)
-        ]
-
-        if not relevant_servers:
+        selected_servers = self._router.select(prompt)
+        if not selected_servers:
             logger.debug(
-                f"No MCP servers matched the current prompt for session={session_id}"
+                "RouterChain found no relevant MCP servers for session={}",
+                session_id,
             )
             return None
 
-        logger.debug(
-            f"Selected MCP servers {[server.label for server in relevant_servers]} for session={session_id}"
-        )
-
-        client = self._build_multi_server_client(relevant_servers)
+        multi_client = self._build_multi_server_client(selected_servers)
         aggregated_sections: list[str] = []
         offline_servers: list[str] = []
-        for server in relevant_servers:
+
+        for server in selected_servers:
+            server_id = self._server_identifier(server)
             try:
-                section = await self._collect_from_server(
-                    client,
-                    server,
-                    prompt,
-                    session_id,
-                )
+                available_tools = await multi_client.list_tools(server_id)
             except Exception:
                 logger.exception(
-                    "Failed collecting MCP context from server={}",
+                    "Failed to initialise MCP server=%s for session=%s",
                     server.label,
+                    session_id,
                 )
                 offline_servers.append(server.label)
                 continue
 
-            if section:
-                aggregated_sections.append(section)
-
-        if not aggregated_sections:
-            if offline_servers:
-                notice = self._format_offline_notice(offline_servers)
-                logger.warning(
-                    f"MCP servers unavailable for session={session_id}: {offline_servers}"
-                )
-                return notice
-
-            logger.debug(
-                f"No contextual data returned from MCP servers for session={session_id}"
-            )
-            return None
-
-        merged = "\n\n".join(aggregated_sections)
-        logger.debug(
-            f"Aggregated MCP context for session={session_id} (length={len(merged)})"
-        )
-        return merged
-
-    async def _collect_from_server(
-        self,
-        client: MultiServerMCPClient,
-        server: McpServerConfig,
-        prompt: str,
-        session_id: str | None,
-    ) -> str | None:
-        """Collect context from a specific MCP server definition."""
-
-        server_id = self._server_identifier(server)
-        command_repr = self._describe_server_command(server)
-
-        async with client.session(server_id) as session:
-            toolkit = MCPToolkit(session=session)
-            await toolkit.initialize()
-
-            raw_tools: list[mcp_types.Tool] = list(toolkit._tools.tools) if toolkit._tools else []
-            logger.debug(
-                f"Initialized LangChain MCP toolkit for server={server.label} exposing {len(raw_tools)} tool(s)"
-            )
-
-            logger.debug(
-                "Collecting MCP context from server={server} using command={command} for session={session} prompt_snippet={snippet}".format(
-                    server=server.label,
-                    command=command_repr,
-                    session=session_id,
-                    snippet=prompt[:80],
-                )
-            )
-
-            available_tools = raw_tools
-            if not available_tools:
+            plans = self._argument_extractor.build_plans(server, prompt, available_tools)
+            if not plans:
                 logger.info(
-                    "MCP server {} exposed no tools for prompt",
+                    "Argument extractor produced no plan for server=%s; skipping",
                     server.label,
                 )
-                return None
-
-            selected_tools = self._select_tools(prompt, available_tools, server)
-            if not selected_tools:
-                logger.info(
-                    "No MCP tools on server {} matched the current prompt; skipping tool calls",
-                    server.label,
-                )
-                return None
+                continue
 
             refined_results: list[dict[str, Any]] = []
-            for tool_info in selected_tools:
-                arguments = self._prepare_tool_arguments(tool_info.name, tool_info.inputSchema, prompt)
-                if arguments is None:
-                    continue
-
+            for plan in plans:
                 try:
-                    tool_result = await session.call_tool(tool_info.name, arguments=arguments)
+                    tool_result = await multi_client.query(
+                        server_id,
+                        tool=plan.tool.name,
+                        arguments=plan.arguments,
+                    )
                 except Exception:
                     logger.exception(
-                        "MCP tool {} invocation failed on server={}",
-                        tool_info.name,
+                        "MCP tool %s invocation failed on server=%s",
+                        plan.tool.name,
                         server.label,
                     )
                     continue
 
                 if tool_result.isError:
                     logger.warning(
-                        "MCP tool {} returned an error payload on server={}",
-                        tool_info.name,
+                        "MCP tool %s returned an error payload on server=%s",
+                        plan.tool.name,
                         server.label,
                     )
                     continue
 
-                refined = self._refine_tool_output(tool_info, tool_result)
+                refined = self._refine_tool_output(plan.tool, tool_result, server.label)
                 if refined:
-                    refined["server"] = server.label
                     refined_results.append(refined)
 
-            if not refined_results:
-                return None
+            if refined_results:
+                aggregated_sections.append(self._format_tool_context(refined_results))
+                logger.debug(
+                    "Server %s produced %d refined MCP result(s)",
+                    server.label,
+                    len(refined_results),
+                )
+            else:
+                logger.debug(
+                    "Server %s returned no actionable MCP context for session=%s",
+                    server.label,
+                    session_id,
+                )
 
-            section = self._format_tool_context(refined_results)
+        if aggregated_sections:
+            merged = "\n\n".join(aggregated_sections)
             logger.debug(
-                f"Server {server.label} produced {len(refined_results)} tool result(s) (length={len(section)})"
+                "Aggregated MCP context for session={} (length={})",
+                session_id,
+                len(merged),
             )
-            return section
+            return merged
 
-    def _select_tools(
-        self,
-        prompt: str,
-        tools: list[mcp_types.Tool],
-        server: McpServerConfig,
-    ) -> list[mcp_types.Tool]:
-        """Select tools that appear relevant to the prompt using heuristics."""
-        if not tools:
-            return []
-
-        keywords = self._keywords_for_server(server)
-        lowered_prompt = prompt.lower()
-        selected: list[mcp_types.Tool] = []
-        seen: set[str] = set()
-
-        def add(tool: mcp_types.Tool) -> None:
-            if tool.name not in seen:
-                selected.append(tool)
-                seen.add(tool.name)
-
-        if keywords:
-            for tool in tools:
-                haystack = f"{tool.name} {(tool.description or '')}".lower()
-                if any(keyword in lowered_prompt and keyword in haystack for keyword in keywords):
-                    add(tool)
-            if selected:
-                return selected
-
-        for tool in tools:
-            tokens = tool.name.lower().replace("_", " ").split()
-            if any(token and token in lowered_prompt for token in tokens):
-                add(tool)
-        if selected:
-            return selected
-
-        return tools
-
-    def _prepare_tool_arguments(
-        self,
-        tool_name: str,
-        schema: dict[str, Any] | None,
-        prompt: str,
-    ) -> dict[str, Any] | None:
-        """Populate tool arguments using the prompt when possible."""
-        schema = schema or {}
-        properties = schema.get("properties", {})
-        if not properties:
-            return {}
-
-        arguments: dict[str, Any] = {}
-        for name, meta in properties.items():
-            field_type = meta.get("type")
-            enum_values = meta.get("enum") or []
-            if enum_values:
-                arguments[name] = enum_values[0]
-                continue
-
-            if field_type == "string":
-                arguments[name] = prompt
-            elif field_type == "array":
-                items = meta.get("items", {})
-                item_enum = items.get("enum") or []
-                if item_enum:
-                    arguments[name] = [item_enum[0]]
-                elif items.get("type") == "string":
-                    arguments[name] = [prompt]
-
-        required = schema.get("required", [])
-        missing = [name for name in required if name not in arguments]
-        if missing:
-            logger.debug(
-                "Skipping MCP tool {} due to unsupported required arguments {}",
-                tool_name,
-                missing,
+        if offline_servers:
+            notice = self._format_offline_notice(offline_servers)
+            logger.warning(
+                "MCP servers unavailable for session={}: {}",
+                session_id,
+                offline_servers,
             )
-            return None
+            return notice
 
-        return arguments
+        logger.debug(
+            "No contextual data returned from MCP servers for session={}",
+            session_id,
+        )
+        return None
 
     def _refine_tool_output(
         self,
         tool_info: mcp_types.Tool,
         tool_result: mcp_types.CallToolResult,
+        server_label: str,
     ) -> dict[str, Any] | None:
         """Extract text/structured content and apply business logic."""
         text_output = self._render_text_content(tool_result.content)
@@ -312,6 +297,7 @@ class MCPContextCollector:
             "name": tool_info.name,
             "description": tool_info.description or "",
             "summary": summary or "",
+            "server": server_label,
         }
         if metrics:
             refined["metrics"] = metrics
@@ -346,7 +332,11 @@ class MCPContextCollector:
 
         if payload is not None:
             summary, metrics = self._summarize_structured_data(payload)
-            preview = self._truncate(json.dumps(payload, ensure_ascii=False)) if isinstance(payload, (dict, list)) else None
+            preview = (
+                self._truncate(json.dumps(payload, ensure_ascii=False))
+                if isinstance(payload, (dict, list))
+                else None
+            )
             if not preview and text_output:
                 preview = self._truncate(text_output)
             return summary, metrics, preview
@@ -476,23 +466,6 @@ class MCPContextCollector:
         except json.JSONDecodeError:
             return None
 
-    def _should_query_server(self, server: McpServerConfig, prompt: str) -> bool:
-        keywords = self._keywords_for_server(server)
-        if not keywords:
-            return True
-        lowered_prompt = prompt.lower()
-        return any(keyword in lowered_prompt for keyword in keywords)
-
-    def _keywords_for_server(self, server: McpServerConfig) -> list[str]:
-        keywords = server.trigger_keywords or self._config.trigger_keywords
-        return [kw.lower() for kw in keywords if kw]
-
-    @staticmethod
-    def _describe_server_command(server: McpServerConfig) -> str:
-        parts = [server.command]
-        parts.extend(server.args)
-        return " ".join(str(part) for part in parts if part)
-
     @staticmethod
     def _format_offline_notice(servers: list[str]) -> str:
         if not servers:
@@ -505,7 +478,7 @@ class MCPContextCollector:
     def _build_multi_server_client(
         self,
         servers: list[McpServerConfig],
-    ) -> MultiServerMCPClient:
+    ) -> QueryCapableMultiServerMCPClient:
         connections: dict[str, dict[str, Any]] = {}
         for server in servers:
             server_id = self._server_identifier(server)
@@ -519,7 +492,7 @@ class MCPContextCollector:
             if server.cwd is not None:
                 connection["cwd"] = server.cwd
             connections[server_id] = connection
-        return MultiServerMCPClient(connections)
+        return QueryCapableMultiServerMCPClient(connections)
 
     @staticmethod
     def _server_identifier(server: McpServerConfig) -> str:
