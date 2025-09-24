@@ -9,12 +9,14 @@ from loguru import logger
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
-
-_DEFAULT_SYSTEM_PROMPT = (
-    "You are a helpful AI assistant. Use the provided conversation context "
-    "when it is available. If the context is empty, respond using only the "
-    "latest user message. Respond with the direct answer only and do not add "
-    "any extra explanation, commentary, or decorative text."
+from ..prompts import (
+    DEFAULT_SYSTEM_PROMPT,
+    ROUTER_HUMAN_PROMPT,
+    ROUTER_SYSTEM_PROMPT,
+    SEQUENTIAL_EXECUTOR_HUMAN_PROMPT,
+    SEQUENTIAL_EXECUTOR_SYSTEM_PROMPT,
+    SEQUENTIAL_PLANNER_HUMAN_PROMPT,
+    SEQUENTIAL_PLANNER_SYSTEM_PROMPT,
 )
 
 
@@ -22,7 +24,7 @@ class ChatChainManager:
     """Encapsulates chat routing and sequential chain execution."""
 
     def __init__(self, system_prompt: str | None = None) -> None:
-        self._system_prompt = system_prompt or _DEFAULT_SYSTEM_PROMPT
+        self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
         self._prompt_template = ChatPromptTemplate.from_messages(
             [
@@ -35,14 +37,11 @@ class ChatChainManager:
             [
                 (
                     "system",
-                    "You analyse user requests and choose the best response path. "
-                    "Reply with JSON of the form {\"route\": \"sequential\"} or {\"route\": \"standard\"}. "
-                    "Pick 'sequential' for multi-step instructions, planning, research, or when the user asks for detailed breakdowns. "
-                    "Use 'standard' for simple, short, or conversational replies.",
+                    ROUTER_SYSTEM_PROMPT,
                 ),
                 (
                     "human",
-                    "Base instructions:\n{system_prompt}\n\nConversation context:\n{context}\n\nUser request:\n{question}",
+                    ROUTER_HUMAN_PROMPT,
                 ),
             ]
         )
@@ -51,13 +50,11 @@ class ChatChainManager:
             [
                 (
                     "system",
-                    "You create concise plans before responding as the assistant. "
-                    "Return a numbered plan (3 bullets max) focusing on how to fulfil the request."
+                    SEQUENTIAL_PLANNER_SYSTEM_PROMPT,
                 ),
                 (
                     "human",
-                    "Base instructions:\n{system_prompt}\n\nConversation context:\n{context}\n\nUser request:\n{question}\n\n"
-                    "Produce the plan only."
+                    SEQUENTIAL_PLANNER_HUMAN_PROMPT,
                 ),
             ]
         )
@@ -66,12 +63,11 @@ class ChatChainManager:
             [
                 (
                     "system",
-                    "You are the assistant following a provided plan. Use the plan, context, and any tool data to craft a thorough yet concise reply."
+                    SEQUENTIAL_EXECUTOR_SYSTEM_PROMPT,
                 ),
                 (
                     "human",
-                    "Base instructions:\n{system_prompt}\n\nConversation context:\n{context}\n\nPlan to follow:\n{plan}\n\n"
-                    "Additional tool context (can be <none>):\n{tool_context}\n\nUser request:\n{question}"
+                    SEQUENTIAL_EXECUTOR_HUMAN_PROMPT,
                 ),
             ]
         )
