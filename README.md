@@ -168,8 +168,10 @@ Below is an overview of additional features supported by the architecture.  Item
 
    To expose Model Context Protocol (MCP) tools to the assistant, set
    `MCP_ENABLED=true` and populate `MCP_SERVERS` with a JSON array of server
-   definitions. Each entry supports `command`, `args`, `env`, `cwd` and optional
-   `trigger_keywords` for per-server routing. For example, to enable the
+   definitions. Each entry supports `command`, `args`, `env`, `cwd`, optional
+   per-server `transport`, and optional `trigger_keywords` for per-server
+   routing. When using HTTP transports you can also provide `url`, `headers`,
+   and timeout values (expressed in seconds). For example, to enable the
    open-source Shadcn UI MCP server alongside a custom toolchain:
 
    ```bash
@@ -187,11 +189,20 @@ Below is an overview of additional features supported by the architecture.  Item
    `LLM_MCP_ENABLED`, `LLM_MCP_TRANSPORT`, `LLM_MCP_TRIGGER_KEYWORDS` and
    `LLM_MCP_SERVERS` variables are still honoured for backward compatibility,
    but new deployments should prefer the streamlined `MCP_*` names.
+   When relying on the legacy single-server variables you can also supply HTTP
+   options such as `MCP_SERVER_URL`, `MCP_SERVER_HEADERS`,
+   `MCP_SERVER_TIMEOUT`, `MCP_SERVER_SSE_READ_TIMEOUT`, and
+   `MCP_SERVER_TERMINATE_ON_CLOSE` (or their `LLM_` equivalents) to configure
+   remote MCP transports without switching to JSON.
 
-   Under the hood the backend now relies on LangChain's `langchain-mcp` toolkit
-   together with `langchain-mcp-adapters` to negotiate and multiplex MCP
-   sessions, so make sure both packages are installed when running outside the
-   provided virtual environment.
+   The backend supports the full suite of transports exposed by
+   `langchain-mcp-adapters`, including `stdio`, `sse`, and streamable HTTP.
+   Set the global `MCP_TRANSPORT` (or legacy `LLM_MCP_TRANSPORT`) to the desired
+   value, or override the transport on individual server definitions. Under the
+   hood the backend relies on LangChain's `langchain-mcp` toolkit together with
+   `langchain-mcp-adapters` to negotiate and multiplex MCP sessions, so make
+   sure both packages are installed when running outside the provided virtual
+   environment.
 
 4. **Run the server**.  If you're using uv, you can run the FastAPI application directly in the uv-managed environment:
 

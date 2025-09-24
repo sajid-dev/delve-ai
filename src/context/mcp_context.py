@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import json
 import threading
 from collections import defaultdict
@@ -34,9 +35,6 @@ class MCPContextCollector:
 
     def collect_context(self, prompt: str, session_id: str | None = None) -> str | None:
         """Synchronously collect additional tool context via the configured MCP transport."""
-        if self._config.transport != "stdio":
-            raise ValueError("Only the 'stdio' MCP transport is currently supported")
-
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -509,18 +507,44 @@ class MCPContextCollector:
         connections: dict[str, dict[str, Any]] = {}
         for server in servers:
             server_id = self._server_identifier(server)
-            connection: dict[str, Any] = {
-                "transport": "stdio",
-                "command": server.command,
-                "args": list(server.args),
-            }
-            if server.env is not None:
-                connection["env"] = server.env
-            if server.cwd is not None:
-                connection["cwd"] = server.cwd
+            transport = server.transport or self._config.transport
+            connection: dict[str, Any] = {"transport": transport}
+
+            if transport == "stdio":
+                connection.update(
+                    {
+                        "command": server.command,
+                        "args": list(server.args),
+                    }
+                )
+                if server.env is not None:
+                    connection["env"] = server.env
+                if server.cwd is not None:
+                    connection["cwd"] = server.cwd
+            elif transport in {"sse", "streamable_http", "websocket"}:
+                connection["url"] = server.url
+                if server.headers is not None:
+                    connection["headers"] = server.headers
+                if server.timeout is not None:
+                    if transport == "streamable_http":
+                        connection["timeout"] = timedelta(seconds=server.timeout)
+                    else:
+                        connection["timeout"] = server.timeout
+                if server.sse_read_timeout is not None:
+                    if transport == "streamable_http":
+                        connection["sse_read_timeout"] = timedelta(
+                            seconds=server.sse_read_timeout
+                        )
+                    else:
+                        connection["sse_read_timeout"] = server.sse_read_timeout
+                if transport == "streamable_http" and server.terminate_on_close is not None:
+                    connection["terminate_on_close"] = server.terminate_on_close
+            else:  # pragma: no cover - validated during configuration
+                raise ValueError(f"Unsupported MCP transport '{transport}'")
+
             connections[server_id] = connection
         return MultiServerMCPClient(connections)
 
     @staticmethod
     def _server_identifier(server: McpServerConfig) -> str:
-        return server.name or server.command
+        return server.name or server.command or (server.url or "server")
